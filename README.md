@@ -8,6 +8,88 @@ PSIRT teams triage CVEs one at a time. This tool steps back and asks: *what do 1
 
 **The feedback loop**: Advisories → Pattern Analysis → Prevention Rules
 
+## Agentic Mode (Strands Agents)
+
+The platform has two modes: a **batch pipeline** for ETL runs, and an **autonomous agent** that wraps the same pipeline stages as tools and reasons about which to invoke based on natural language queries.
+
+```bash
+# Set up Python 3.10+ venv (required for Strands SDK)
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Interactive agent
+export $(cat .env | grep -v '#' | xargs)
+python agent.py
+
+# Single query
+python agent.py "Which CWE patterns recur the most and which lack Semgrep coverage?"
+```
+
+**What the agent does differently from the pipeline:**
+
+| Batch Pipeline | Agentic Mode |
+|---|---|
+| Runs all stages in fixed order | LLM decides which tools to call based on the question |
+| `python main.py pipeline` | "What new advisories match our top CWE patterns?" |
+| Same output every time | Chains tools, cross-references data, recommends actions |
+| No interaction | Conversational — ask follow-ups, drill into specifics |
+
+**Example session:**
+
+```
+You > Which CVEs should be top priority?
+Agent > [calls query_advisory_db] → [analyzes CVSS + EPSS + KEV signals]
+
+  TIER 0 (48h): CVE-2026-16812 (CVSS 10.0 + KEV + CWE-78),
+                CVE-2021-44228 (EPSS 0.99999 + KEV)
+  TIER 1 (7d):  CVE-2024-3094 (CVSS 10.0, EPSS 0.86)
+  ...
+  Recommendation: Patch TIER 0 immediately. Generate Semgrep rules
+  for the 4 uncovered CWE categories.
+
+You > Generate the rules for CWE-290
+Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML output
+```
+
+### Agent Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     STRANDS AGENT LAYER                          │
+│                                                                  │
+│  User ──▶ Agent (Claude Haiku 4.5) ──▶ Reasoning Loop           │
+│                    │                                             │
+│                    ├──▶ scrape_advisories      (src/scraper)     │
+│                    ├──▶ enrich_cves            (src/enricher)    │
+│                    ├──▶ classify_advisories    (src/ai)          │
+│                    ├──▶ query_advisory_db      (src/db)          │
+│                    ├──▶ analyze_patterns       (src/analyzer)    │
+│                    ├──▶ generate_insights      (src/ai)          │
+│                    └──▶ generate_semgrep_rules (src/rules)       │
+│                                                                  │
+│  The LLM decides which tools to call and in what order.          │
+│  Tools wrap existing pipeline modules — no code rewrite needed.  │
+├──────────────────────────────────────────────────────────────────┤
+│                        EVAL SUITE                                │
+│                                                                  │
+│  Tool Selection ··········· Does the agent pick the right tool?  │
+│  Data Accuracy ············ Does it return real numbers?          │
+│  Hallucination Resistance · Does it refuse to fabricate data?    │
+│  Multi-Step Reasoning ····· Can it chain tools for complex Qs?   │
+│  Escalation Judgment ······ Does it prioritize correctly?        │
+│                                                                  │
+│  Result: 13/14 passed (93%)                                      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Running Evals
+
+```bash
+python -m evals.eval_agent            # Full suite (14 tests, ~3 min)
+python -m evals.eval_agent --quick    # Tool selection only
+# Results saved to data/eval_results.json
+```
+
 ## What It Does
 
 1. **Scrapes** all 181 published Arista EOS security advisories (CSAF JSON + advisory detail pages)
@@ -83,24 +165,34 @@ python main.py serve
 | `python main.py rules` | Generate Semgrep rules from CWE patterns |
 | `python main.py pipeline` | Run scrape + enrich + classify in sequence |
 | `python main.py serve` | Start the dashboard (default: port 8000) |
+| `python agent.py` | Interactive agentic analyst (Strands) |
+| `python agent.py "query"` | Single-query agent mode |
+| `python -m evals.eval_agent` | Run full eval suite (14 tests) |
+| `python -m evals.eval_agent --quick` | Run tool selection evals only |
 
 ## Project Structure
 
 ```
 advisory-intel/
-├── main.py                          # CLI entry point
+├── main.py                          # CLI entry point (batch pipeline)
+├── agent.py                         # Agentic entry point (Strands agent)
 ├── requirements.txt                 # Python dependencies
 ├── .env                             # ANTHROPIC_API_KEY (not committed)
 ├── data/
 │   ├── advisory_intel.db            # SQLite database (all state)
+│   ├── eval_results.json            # Latest eval run results
 │   ├── csaf_links.json              # 40 CSAF JSON download URLs
 │   ├── csaf_batch1.json             # Downloaded CSAF documents (batch 1)
 │   ├── csaf_batch2.json             # Downloaded CSAF documents (batch 2)
 │   ├── advisory_list.json           # 182 advisory summaries (all pages)
 │   ├── detail_batch_latest.json     # SA-0173 to SA-0182 detail extractions
 │   └── detail_batch_all.json        # SA-0001 to SA-0172 detail extractions
+├── evals/
+│   └── eval_agent.py                # 5-category eval suite (14 test cases)
 └── src/
     ├── db.py                        # SQLite schema (4 tables)
+    ├── agent/
+    │   └── tools.py                 # 7 @tool wrappers for Strands agent
     ├── scraper/
     │   └── arista.py                # CSAF JSON + advisory list scraper
     ├── enricher/
@@ -153,11 +245,12 @@ advisory-intel/
 
 ## Tech Stack
 
-- **Python 3.9+** — core pipeline
+- **Python 3.12** — core pipeline (3.10+ required for Strands SDK)
+- **Strands Agents SDK** — agentic framework with `@tool` decorator, model-driven reasoning loop
 - **SQLite** (WAL mode) — single-file database, no external DB needed
 - **FastAPI + Uvicorn** — REST API + dashboard server
 - **Chart.js 4.4** — interactive charts (CDN, no build step)
-- **Claude Haiku 4.5** — advisory classification + insights (~$0.25 for full run)
+- **Claude Haiku 4.5** — advisory classification, insights, and agent reasoning (~$0.25 for full pipeline run)
 - **Semgrep YAML** — output format for SAST rules
 
 ## API Endpoints
