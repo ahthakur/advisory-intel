@@ -361,7 +361,11 @@ def scan_infrastructure(container_name: Optional[str] = None) -> str:
                 f"  Capabilities added: {c['cap_add']}",
                 f"  Security options: {c['security_opt']}",
                 f"  Network mode: {c['network_mode']}",
-                f"  Exposed ports: {c['ports']}",
+                f"  Exposed ports: {c.get('exposed_ports', c['ports'])}",
+                f"  Volume mounts: {c.get('mounts', [])}",
+                f"  Memory limit: {c.get('memory_limit', 0)} bytes",
+                f"  PID mode: {c.get('pid_mode', '')}",
+                f"  User: {c.get('user', '') or '(root)'}",
                 f"  Compliance tier: {c['labels'].get('complianceguard.tier', 'unknown')}",
             ]
             return "\n".join(lines)
@@ -384,8 +388,9 @@ def scan_infrastructure(container_name: Optional[str] = None) -> str:
         if findings:
             lines.append("Findings:")
             for f in findings:
+                cwe_tag = f" [CWE: {f['cwe']}]" if f.get("cwe") else ""
                 lines.append(
-                    f"  [{f['severity']}] {f['container']} — {f['rule_id']}: "
+                    f"  [{f['severity']}] {f['container']} — {f['rule_id']}{cwe_tag}: "
                     f"{f['description']} (expected: {f['declared']}, observed: {f['observed']})"
                 )
         else:
@@ -423,38 +428,38 @@ def cross_reference_advisory_with_infrastructure(cwe_id: Optional[str] = None) -
     CWE_TO_COMPLIANCE_RULES = {
         "CWE-78": {
             "name": "OS Command Injection",
-            "compliance_rules": ["no-privileged-containers", "drop-all-capabilities"],
-            "rationale": "Privileged containers and excessive capabilities amplify command injection impact",
+            "compliance_rules": ["drop-all-capabilities", "no-added-capabilities", "no-privileged-containers"],
+            "rationale": "Capabilities like CAP_SYS_ADMIN enable OS-level command execution; privileged mode grants full host kernel access — both amplify command injection blast radius",
         },
-        "CWE-287": {
-            "name": "Improper Authentication",
-            "compliance_rules": ["no-new-privileges"],
-            "rationale": "Privilege escalation after auth bypass is prevented by no-new-privileges",
+        "CWE-250": {
+            "name": "Execution with Unnecessary Privileges",
+            "compliance_rules": ["no-privileged-containers", "no-added-capabilities", "no-new-privileges"],
+            "rationale": "Direct mapping — privileged mode, added capabilities, and privilege escalation are the container equivalents of unnecessary privilege",
         },
         "CWE-269": {
             "name": "Improper Privilege Management",
-            "compliance_rules": ["no-privileged-containers", "drop-all-capabilities", "no-new-privileges"],
-            "rationale": "Direct mapping — privilege management vulnerabilities are mitigated by least-privilege container config",
+            "compliance_rules": ["no-added-capabilities", "no-host-pid", "no-new-privileges"],
+            "rationale": "Adding capabilities re-introduces attack surface; host PID namespace breaks process isolation; no-new-privileges prevents setuid escalation",
         },
-        "CWE-863": {
-            "name": "Incorrect Authorization",
-            "compliance_rules": ["no-privileged-containers", "no-new-privileges"],
-            "rationale": "Authorization bypass impact is contained by restricting container privileges",
+        "CWE-287": {
+            "name": "Improper Authentication",
+            "compliance_rules": ["no-exposed-sensitive-ports", "no-host-network"],
+            "rationale": "Exposing database/cache ports without network controls and host network mode both bypass authentication boundaries — the same pattern as Arista management plane auth bypass advisories",
         },
-        "CWE-200": {
-            "name": "Information Exposure",
-            "compliance_rules": ["read-only-root-filesystem"],
-            "rationale": "Read-only filesystem prevents attackers from writing exfiltration tools",
+        "CWE-290": {
+            "name": "Authentication Bypass by Spoofing",
+            "compliance_rules": ["no-host-network"],
+            "rationale": "Host network mode shares the host network stack, enabling IP/ARP spoofing that bypasses container network isolation — direct analog to network-level auth bypass",
         },
-        "CWE-532": {
-            "name": "Sensitive Info in Logs",
-            "compliance_rules": ["read-only-root-filesystem"],
-            "rationale": "Read-only filesystem limits where log files with sensitive data can be written",
+        "CWE-732": {
+            "name": "Incorrect Permission Assignment",
+            "compliance_rules": ["no-docker-socket-mount", "read-only-root-filesystem"],
+            "rationale": "Docker socket mount grants unrestricted API access (root-equivalent); writable filesystem lets attackers persist malware or modify configs",
         },
         "CWE-400": {
             "name": "Uncontrolled Resource Consumption",
-            "compliance_rules": ["drop-all-capabilities"],
-            "rationale": "Dropping capabilities limits resource access vectors for DoS",
+            "compliance_rules": ["memory-limit-required"],
+            "rationale": "Containers without memory limits can exhaust host resources — direct mapping to DoS via resource consumption seen in Arista advisories",
         },
     }
 
