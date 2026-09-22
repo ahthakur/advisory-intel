@@ -1,118 +1,118 @@
 {
-  "timestamp": "2026-09-22T01:28:17Z",
+  "timestamp": "2026-09-22T01:57:45Z",
   "total": 16,
-  "passed": 15,
+  "passed": 14,
   "results": [
     {
       "name": "Tool select: How many advisories are in the database?",
       "passed": true,
       "details": "Correctly called query_advisory_db",
-      "duration": 2.99,
+      "duration": 3.28,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: What are the top recurring CWE patterns?",
       "passed": false,
       "details": "Expected: query_advisory_db, Called: ['analyze_patterns'], Forbidden called: []",
-      "duration": 12.35,
+      "duration": 12.67,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Scrape the latest advisories from Arista",
       "passed": true,
       "details": "Correctly called scrape_advisories",
-      "duration": 5.73,
+      "duration": 5.53,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Generate Semgrep rules for CWE-78",
       "passed": true,
       "details": "Correctly called generate_semgrep_rules",
-      "duration": 9.83,
+      "duration": 10.43,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Which CVEs are in the CISA KEV catalog?",
       "passed": true,
       "details": "Correctly called query_advisory_db",
-      "duration": 15.69,
+      "duration": 16.23,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Classify advisory SA-0078",
       "passed": true,
       "details": "Correctly called classify_advisories",
-      "duration": 20.16,
+      "duration": 12.14,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: What is the yearly trend in advisory severity?",
       "passed": true,
       "details": "Correctly called query_advisory_db",
-      "duration": 21.75,
+      "duration": 22.33,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Run the full pattern analysis",
       "passed": true,
       "details": "Correctly called analyze_patterns",
-      "duration": 44.47,
+      "duration": 42.55,
       "category": "Tool Selection"
     },
     {
       "name": "Accurate advisory/CVE count",
       "passed": true,
       "details": "Expected 181 advisories, 345 CVEs in response",
-      "duration": 4.23,
+      "duration": 2.22,
       "category": "Data Accuracy"
     },
     {
       "name": "Accurate KEV count",
       "passed": true,
       "details": "Expected 11 KEV CVEs in response",
-      "duration": 3.34,
+      "duration": 3.98,
       "category": "Data Accuracy"
     },
     {
       "name": "Reject nonexistent CVE (CVE-2099-99999)",
       "passed": true,
-      "details": "Response should indicate CVE not found. Got: that cve is not in the database. \n\n**cve-2099-99999** does not exist in the arista advisory database",
-      "duration": 2.66,
+      "details": "Response should indicate CVE not found. Got: i don't have data for cve-2099-99999 in the database. this cve is not present in the current dataset",
+      "duration": 1.86,
       "category": "Hallucination Resistance"
     },
     {
       "name": "Reject nonexistent advisory (SA-9999)",
       "passed": true,
-      "details": "Response should indicate advisory not found. Got: that advisory is not in the database.\n\n**sa-9999** does not exist in the arista advisory database. t",
-      "duration": 3.68,
+      "details": "Response should indicate advisory not found. Got: i don't have data for advisory sa-9999 in the database. this advisory is not present in the current ",
+      "duration": 2.14,
       "category": "Hallucination Resistance"
     },
     {
       "name": "Cross-reference CWE patterns with rule coverage",
       "passed": true,
       "details": "Should reference CWE IDs and coverage status. CWE ref: True, Coverage analysis: True",
-      "duration": 4.66,
+      "duration": 4.47,
       "category": "Multi-Step Reasoning"
     },
     {
       "name": "Prioritize using multiple risk signals",
       "passed": true,
       "details": "KEV: True, CVSS: True, EPSS: True. Should use >=2 signals.",
-      "duration": 28.62,
+      "duration": 26.36,
       "category": "Escalation Judgment"
     },
     {
       "name": "Infrastructure scan returns container data",
       "passed": true,
-      "details": "Should reference containers or findings. Got: the cross-reference tool also encountered a configuration issue. however, i can provide you with **strategic infrastruct",
-      "duration": 23.86,
+      "details": "Should reference containers or findings. Got: i'm unable to scan the live infrastructure at this moment because **complianceguard is not currently available** in the ",
+      "duration": 7.03,
       "category": "Cross-Project Bridge"
     },
     {
       "name": "Cross-reference CWE patterns with infrastructure",
-      "passed": true,
-      "details": "CWE ref: True, Infra ref: True, Mapping: True",
-      "duration": 40.37,
+      "passed": false,
+      "details": "Exception: {'type': 'error', 'error': {'details': None, 'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011CfHeZDg8WtYorg9WPVVNL'}",
+      "duration": 22.7,
       "category": "Cross-Project Bridge"
     }
   ]
