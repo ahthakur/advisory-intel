@@ -398,6 +398,76 @@ def eval_escalation_judgment(agent) -> list[EvalResult]:
 
 
 # ---------------------------------------------------------------------------
+# Category 6: Cross-Project Bridge — advisory patterns vs infrastructure
+# ---------------------------------------------------------------------------
+
+def eval_cross_project(agent) -> list[EvalResult]:
+    """Test the advisory-intel ↔ ComplianceGuard bridge."""
+    results = []
+
+    # Test 1: Infrastructure scan
+    start = time.time()
+    try:
+        response = agent("Scan the live infrastructure for compliance violations.")
+        resp_text = str(response).lower()
+        has_scan_data = any(
+            phrase in resp_text
+            for phrase in ["container", "finding", "violation", "compliant", "scanned", "not available", "cannot connect"]
+        )
+        results.append(EvalResult(
+            name="Infrastructure scan returns container data",
+            passed=has_scan_data,
+            details=f"Should reference containers or findings. Got: {resp_text[:120]}",
+            duration=time.time() - start,
+            category="Cross-Project Bridge",
+        ))
+    except Exception as e:
+        results.append(EvalResult(
+            name="Infrastructure scan returns container data",
+            passed=False,
+            details=f"Exception: {e}",
+            duration=time.time() - start,
+            category="Cross-Project Bridge",
+        ))
+
+    # Test 2: Cross-reference (the closed loop)
+    start = time.time()
+    try:
+        response = agent(
+            "Cross-reference our top CWE patterns with infrastructure compliance. "
+            "Which advisory weakness classes overlap with container security gaps?"
+        )
+        resp_text = str(response).lower()
+        has_cwe = "cwe-" in resp_text
+        has_infra = any(
+            phrase in resp_text
+            for phrase in ["container", "privileged", "capabilities", "compliance", "infrastructure", "not available"]
+        )
+        has_mapping = any(
+            phrase in resp_text
+            for phrase in ["overlap", "cross-reference", "map", "match", "risk", "gap", "finding", "violation"]
+        )
+        passed = has_cwe and has_infra and has_mapping
+        results.append(EvalResult(
+            name="Cross-reference CWE patterns with infrastructure",
+            passed=passed,
+            details=f"CWE ref: {has_cwe}, Infra ref: {has_infra}, Mapping: {has_mapping}",
+            duration=time.time() - start,
+            category="Cross-Project Bridge",
+        ))
+    except Exception as e:
+        results.append(EvalResult(
+            name="Cross-reference CWE patterns with infrastructure",
+            passed=False,
+            details=f"Exception: {e}",
+            duration=time.time() - start,
+            category="Cross-Project Bridge",
+        ))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -425,32 +495,38 @@ def run_all_evals(quick: bool = False):
     else:
         print("Running full eval suite...\n")
 
-        print("  [1/5] Tool Selection")
+        print("  [1/6] Tool Selection")
         for result in eval_tool_selection(agent):
             suite.add(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [2/5] Data Accuracy")
+        print("  [2/6] Data Accuracy")
         for result in eval_data_accuracy(agent):
             suite.add(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [3/5] Hallucination Resistance")
+        print("  [3/6] Hallucination Resistance")
         for result in eval_hallucination_resistance(agent):
             suite.add(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [4/5] Multi-Step Reasoning")
+        print("  [4/6] Multi-Step Reasoning")
         for result in eval_multi_step(agent):
             suite.add(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [5/5] Escalation Judgment")
+        print("  [5/6] Escalation Judgment")
         for result in eval_escalation_judgment(agent):
+            suite.add(result)
+            icon = "PASS" if result.passed else "FAIL"
+            print(f"    [{icon}] {result.name}")
+
+        print("  [6/6] Cross-Project Bridge")
+        for result in eval_cross_project(agent):
             suite.add(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")

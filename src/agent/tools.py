@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 from strands import tool
@@ -311,6 +313,210 @@ def generate_semgrep_rules(cwe_filter: Optional[str] = None) -> str:
     return summary
 
 
+COMPLIANCEGUARD_ROOT = Path(__file__).parent.parent.parent.parent.parent / "complianceguard"
+
+
+@tool
+def scan_infrastructure(container_name: Optional[str] = None) -> str:
+    """Scan live Docker containers for compliance violations using ComplianceGuard.
+
+    Connects to the ComplianceGuard project to scan running containers against
+    security policies (privileged mode, capabilities, read-only filesystem,
+    no-new-privileges). Use this to cross-reference advisory patterns with
+    live infrastructure state — the PSIRT-to-runtime feedback loop.
+
+    Args:
+        container_name: Optional specific container to inspect (e.g. "cg-data-processor"). If omitted, scans all managed containers and evaluates compliance.
+    """
+    import sys
+    cg_root = str(COMPLIANCEGUARD_ROOT)
+    if cg_root not in sys.path:
+        sys.path.insert(0, cg_root)
+
+    old_policy_dir = os.environ.get("POLICY_DIR")
+    os.environ["POLICY_DIR"] = str(COMPLIANCEGUARD_ROOT / "policies")
+
+    try:
+        from agent.scanner import scan_containers, scan_all
+        from agent.evaluator import evaluate_all
+
+        if container_name:
+            containers = scan_containers()
+            matched = [c for c in containers if container_name.lower() in c["name"].lower()]
+            if not matched:
+                available = [c["name"] for c in containers]
+                return (
+                    f"Container '{container_name}' not found. "
+                    f"Available managed containers: {', '.join(available)}"
+                )
+            c = matched[0]
+            lines = [
+                f"Container: {c['name']}",
+                f"Status: {c['status']} (running: {c['running']})",
+                f"Image: {c['image']}",
+                f"Security config:",
+                f"  Privileged: {c['privileged']}",
+                f"  Read-only filesystem: {c['read_only']}",
+                f"  Capabilities dropped: {c['cap_drop']}",
+                f"  Capabilities added: {c['cap_add']}",
+                f"  Security options: {c['security_opt']}",
+                f"  Network mode: {c['network_mode']}",
+                f"  Exposed ports: {c['ports']}",
+                f"  Compliance tier: {c['labels'].get('complianceguard.tier', 'unknown')}",
+            ]
+            return "\n".join(lines)
+
+        observed = scan_all()
+        evaluated = evaluate_all(observed)
+        summary = evaluated.get("summary", {})
+        findings = evaluated.get("findings", [])
+
+        lines = [
+            f"ComplianceGuard Infrastructure Scan:",
+            f"  Containers scanned: {summary.get('containers_scanned', 0)}",
+            f"  Total findings: {summary.get('total_findings', 0)}",
+            f"  Critical: {summary.get('critical', 0)}",
+            f"  High: {summary.get('high', 0)}",
+            f"  Medium: {summary.get('medium', 0)}",
+            f"",
+        ]
+
+        if findings:
+            lines.append("Findings:")
+            for f in findings:
+                lines.append(
+                    f"  [{f['severity']}] {f['container']} — {f['rule_id']}: "
+                    f"{f['description']} (expected: {f['declared']}, observed: {f['observed']})"
+                )
+        else:
+            lines.append("All containers are compliant.")
+
+        return "\n".join(lines)
+
+    except ImportError as e:
+        return (
+            f"ComplianceGuard not available: {e}. "
+            f"Ensure the complianceguard project exists at {cg_root}"
+        )
+    except RuntimeError as e:
+        return f"Cannot connect to Docker: {e}. Make sure Docker Desktop is running."
+    finally:
+        if old_policy_dir is not None:
+            os.environ["POLICY_DIR"] = old_policy_dir
+        elif "POLICY_DIR" in os.environ:
+            del os.environ["POLICY_DIR"]
+
+
+@tool
+def cross_reference_advisory_with_infrastructure(cwe_id: Optional[str] = None) -> str:
+    """Cross-reference advisory CWE patterns with live infrastructure compliance state.
+
+    This is the full closed-loop: advisory history reveals which weakness classes
+    recur, and this tool checks whether running containers have related compliance
+    gaps. Maps CWE categories to ComplianceGuard policy rules.
+
+    Args:
+        cwe_id: Optional specific CWE to check (e.g. "CWE-78"). If omitted, checks the top 5 recurring CWEs.
+    """
+    init_db()
+
+    CWE_TO_COMPLIANCE_RULES = {
+        "CWE-78": {
+            "name": "OS Command Injection",
+            "compliance_rules": ["no-privileged-containers", "drop-all-capabilities"],
+            "rationale": "Privileged containers and excessive capabilities amplify command injection impact",
+        },
+        "CWE-287": {
+            "name": "Improper Authentication",
+            "compliance_rules": ["no-new-privileges"],
+            "rationale": "Privilege escalation after auth bypass is prevented by no-new-privileges",
+        },
+        "CWE-269": {
+            "name": "Improper Privilege Management",
+            "compliance_rules": ["no-privileged-containers", "drop-all-capabilities", "no-new-privileges"],
+            "rationale": "Direct mapping — privilege management vulnerabilities are mitigated by least-privilege container config",
+        },
+        "CWE-863": {
+            "name": "Incorrect Authorization",
+            "compliance_rules": ["no-privileged-containers", "no-new-privileges"],
+            "rationale": "Authorization bypass impact is contained by restricting container privileges",
+        },
+        "CWE-200": {
+            "name": "Information Exposure",
+            "compliance_rules": ["read-only-root-filesystem"],
+            "rationale": "Read-only filesystem prevents attackers from writing exfiltration tools",
+        },
+        "CWE-532": {
+            "name": "Sensitive Info in Logs",
+            "compliance_rules": ["read-only-root-filesystem"],
+            "rationale": "Read-only filesystem limits where log files with sensitive data can be written",
+        },
+        "CWE-400": {
+            "name": "Uncontrolled Resource Consumption",
+            "compliance_rules": ["drop-all-capabilities"],
+            "rationale": "Dropping capabilities limits resource access vectors for DoS",
+        },
+    }
+
+    conn = get_connection()
+    if cwe_id:
+        cwes_to_check = [{"cwe_id": cwe_id.upper()}]
+        row = conn.execute(
+            "SELECT COUNT(*) as count, ROUND(AVG(cvss_score), 1) as avg_cvss FROM cves WHERE cwe_id = ?",
+            (cwe_id.upper(),)
+        ).fetchone()
+        if row:
+            cwes_to_check[0]["count"] = row["count"]
+            cwes_to_check[0]["avg_cvss"] = row["avg_cvss"]
+    else:
+        cwes_to_check = [dict(r) for r in conn.execute("""
+            SELECT cwe_id, COUNT(*) as count, ROUND(AVG(cvss_score), 1) as avg_cvss
+            FROM cves WHERE cwe_id IS NOT NULL
+            GROUP BY cwe_id ORDER BY count DESC LIMIT 5
+        """).fetchall()]
+    conn.close()
+
+    infra_result = scan_infrastructure.tool_func()
+
+    lines = [
+        "CROSS-REFERENCE: Advisory Patterns vs Infrastructure Compliance",
+        "=" * 60,
+        "",
+    ]
+
+    for cwe in cwes_to_check:
+        cid = cwe.get("cwe_id", "")
+        mapping = CWE_TO_COMPLIANCE_RULES.get(cid)
+        lines.append(f"  {cid} — {mapping['name'] if mapping else 'Unknown'} ({cwe.get('count', '?')}x, avg CVSS {cwe.get('avg_cvss', '?')})")
+
+        if not mapping:
+            lines.append(f"    No compliance rule mapping defined for {cid}")
+            lines.append("")
+            continue
+
+        lines.append(f"    Rationale: {mapping['rationale']}")
+        lines.append(f"    Related compliance rules: {', '.join(mapping['compliance_rules'])}")
+
+        for rule_id in mapping["compliance_rules"]:
+            if f"— {rule_id}:" in infra_result:
+                lines.append(f"    !! FINDING: Infrastructure has violations for '{rule_id}'")
+                for infra_line in infra_result.split("\n"):
+                    if rule_id in infra_line:
+                        lines.append(f"       {infra_line.strip()}")
+            else:
+                lines.append(f"    OK: No violations for '{rule_id}'")
+        lines.append("")
+
+    has_gaps = "FINDING" in "\n".join(lines)
+    if has_gaps:
+        lines.append("RISK: Advisory patterns AND infrastructure gaps overlap.")
+        lines.append("Recommend: Fix compliance violations to reduce attack surface for these CWE categories.")
+    else:
+        lines.append("No overlap between advisory patterns and infrastructure compliance gaps.")
+
+    return "\n".join(lines)
+
+
 ALL_TOOLS = [
     scrape_advisories,
     enrich_cves,
@@ -319,4 +525,6 @@ ALL_TOOLS = [
     analyze_patterns,
     generate_insights,
     generate_semgrep_rules,
+    scan_infrastructure,
+    cross_reference_advisory_with_infrastructure,
 ]

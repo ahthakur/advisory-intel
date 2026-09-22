@@ -8,6 +8,9 @@ Usage:
     export ANTHROPIC_API_KEY=your-key
     python agent.py                     # Interactive REPL
     python agent.py "your question"     # Single query mode
+
+    # With OTEL tracing to Grafana/Tempo:
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python agent.py
 """
 
 import os
@@ -17,6 +20,7 @@ from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
 from src.agent.tools import ALL_TOOLS
+from src.agent.tracing import initialize_tracing, shutdown_tracing, get_tracer
 from src.db import init_db
 
 SYSTEM_PROMPT = """\
@@ -32,6 +36,8 @@ You have access to these capabilities:
 - **analyze_patterns**: Run comprehensive pattern analysis (CWE distribution, severity, trends)
 - **generate_insights**: Generate AI-powered program-level insights with SDLC recommendations
 - **generate_semgrep_rules**: Generate Semgrep SAST rules from recurring CWE patterns
+- **scan_infrastructure**: Scan live Docker containers for compliance violations (via ComplianceGuard)
+- **cross_reference_advisory_with_infrastructure**: Map advisory CWE patterns to infrastructure compliance gaps — the full closed-loop
 
 ## How to operate
 
@@ -58,7 +64,13 @@ and CISA KEV (Known Exploited Vulnerabilities) status. AI classifications tag ea
 with affected component, attack surface, vulnerability category, and root cause. Semgrep \
 rules are generated from the most recurring CWE patterns to prevent future occurrences.
 
-This is a PSIRT-to-SDLC feedback loop: past vulnerabilities drive prevention rules."""
+This is a PSIRT-to-SDLC feedback loop: past vulnerabilities drive prevention rules.
+
+You also have access to ComplianceGuard, which scans live Docker containers against \
+security policies (privileged mode, capabilities, read-only filesystem, no-new-privileges). \
+When you identify advisory patterns, you can cross-reference them with infrastructure \
+compliance state to find where advisory-identified weaknesses AND infrastructure gaps \
+overlap — that's where real risk lives."""
 
 
 def create_agent() -> Agent:
@@ -109,14 +121,24 @@ def main():
         sys.exit(1)
 
     init_db()
-    agent = create_agent()
+    initialize_tracing()
+    tracer = get_tracer("advisory-intel-agent")
 
-    if len(sys.argv) > 1:
-        query = " ".join(sys.argv[1:])
-        response = agent(query)
-        print(response)
-    else:
-        run_interactive(agent)
+    try:
+        agent = create_agent()
+
+        if len(sys.argv) > 1:
+            query = " ".join(sys.argv[1:])
+            with tracer.start_as_current_span("agent.query") as span:
+                span.set_attribute("agent.query", query)
+                span.set_attribute("agent.mode", "single")
+                response = agent(query)
+                span.set_attribute("agent.response_length", len(str(response)))
+                print(response)
+        else:
+            run_interactive(agent)
+    finally:
+        shutdown_tracing()
 
 
 if __name__ == "__main__":

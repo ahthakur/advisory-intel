@@ -59,16 +59,38 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │                                                                  │
 │  User ──▶ Agent (Claude Haiku 4.5) ──▶ Reasoning Loop           │
 │                    │                                             │
-│                    ├──▶ scrape_advisories      (src/scraper)     │
-│                    ├──▶ enrich_cves            (src/enricher)    │
-│                    ├──▶ classify_advisories    (src/ai)          │
-│                    ├──▶ query_advisory_db      (src/db)          │
-│                    ├──▶ analyze_patterns       (src/analyzer)    │
-│                    ├──▶ generate_insights      (src/ai)          │
-│                    └──▶ generate_semgrep_rules (src/rules)       │
+│                    ├──▶ scrape_advisories        (src/scraper)   │
+│                    ├──▶ enrich_cves              (src/enricher)  │
+│                    ├──▶ classify_advisories      (src/ai)        │
+│                    ├──▶ query_advisory_db        (src/db)        │
+│                    ├──▶ analyze_patterns         (src/analyzer)  │
+│                    ├──▶ generate_insights        (src/ai)        │
+│                    ├──▶ generate_semgrep_rules   (src/rules)     │
+│                    ├──▶ scan_infrastructure      (ComplianceGuard)
+│                    └──▶ cross_reference_advisory (bridge)        │
+│                         _with_infrastructure                     │
 │                                                                  │
 │  The LLM decides which tools to call and in what order.          │
 │  Tools wrap existing pipeline modules — no code rewrite needed.  │
+├──────────────────────────────────────────────────────────────────┤
+│                  COMPLIANCEGUARD BRIDGE                           │
+│                                                                  │
+│  advisory-intel ◄──────────────────────► ComplianceGuard         │
+│  (CWE patterns)    CWE-to-policy map    (container compliance)  │
+│                                                                  │
+│  CWE-78  ──▶ no-privileged-containers + drop-all-capabilities   │
+│  CWE-269 ──▶ no-privileged-containers + no-new-privileges       │
+│  CWE-732 ──▶ read-only-root-filesystem                          │
+│                                                                  │
+│  Finds where advisory weakness patterns AND infrastructure      │
+│  compliance gaps overlap — that's where real risk lives.         │
+├──────────────────────────────────────────────────────────────────┤
+│                     OTEL TRACING                                 │
+│                                                                  │
+│  Agent ──▶ TracerProvider ──▶ ConsoleExporter (demo)             │
+│                           ──▶ OTLPExporter   (Grafana/Tempo)    │
+│                                                                  │
+│  Every tool call, reasoning step, and query gets a trace span.  │
 ├──────────────────────────────────────────────────────────────────┤
 │                        EVAL SUITE                                │
 │                                                                  │
@@ -77,17 +99,28 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │  Hallucination Resistance · Does it refuse to fabricate data?    │
 │  Multi-Step Reasoning ····· Can it chain tools for complex Qs?   │
 │  Escalation Judgment ······ Does it prioritize correctly?        │
+│  Cross-Project Bridge ····· Does it bridge advisory + infra?     │
 │                                                                  │
-│  Result: 13/14 passed (93%)                                      │
+│  Result: 15/16 passed (94%)                                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Running Evals
 
 ```bash
-python -m evals.eval_agent            # Full suite (14 tests, ~3 min)
+python -m evals.eval_agent            # Full suite (16 tests, ~4 min)
 python -m evals.eval_agent --quick    # Tool selection only
 # Results saved to data/eval_results.json
+```
+
+### OTEL Tracing
+
+```bash
+# Console tracing (default — for demos)
+python agent.py "What are the top CWE patterns?"
+
+# Send traces to Grafana/Tempo
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python agent.py
 ```
 
 ## What It Does
@@ -167,7 +200,7 @@ python main.py serve
 | `python main.py serve` | Start the dashboard (default: port 8000) |
 | `python agent.py` | Interactive agentic analyst (Strands) |
 | `python agent.py "query"` | Single-query agent mode |
-| `python -m evals.eval_agent` | Run full eval suite (14 tests) |
+| `python -m evals.eval_agent` | Run full eval suite (16 tests) |
 | `python -m evals.eval_agent --quick` | Run tool selection evals only |
 
 ## Project Structure
@@ -188,11 +221,12 @@ advisory-intel/
 │   ├── detail_batch_latest.json     # SA-0173 to SA-0182 detail extractions
 │   └── detail_batch_all.json        # SA-0001 to SA-0172 detail extractions
 ├── evals/
-│   └── eval_agent.py                # 5-category eval suite (14 test cases)
+│   └── eval_agent.py                # 6-category eval suite (16 test cases)
 └── src/
     ├── db.py                        # SQLite schema (4 tables)
     ├── agent/
-    │   └── tools.py                 # 7 @tool wrappers for Strands agent
+    │   ├── tools.py                 # 9 @tool wrappers for Strands agent
+    │   └── tracing.py               # OTEL tracing (console + OTLP export)
     ├── scraper/
     │   └── arista.py                # CSAF JSON + advisory list scraper
     ├── enricher/
@@ -251,6 +285,8 @@ advisory-intel/
 - **FastAPI + Uvicorn** — REST API + dashboard server
 - **Chart.js 4.4** — interactive charts (CDN, no build step)
 - **Claude Haiku 4.5** — advisory classification, insights, and agent reasoning (~$0.25 for full pipeline run)
+- **OpenTelemetry** — distributed tracing for agent decision audit trail (console or OTLP/Grafana)
+- **Docker SDK** — ComplianceGuard bridge for live container scanning
 - **Semgrep YAML** — output format for SAST rules
 
 ## API Endpoints
