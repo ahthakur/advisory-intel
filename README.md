@@ -4,7 +4,7 @@
 
 ## The Thesis
 
-PSIRT teams triage CVEs one at a time. This tool steps back and asks: *what do 181 advisories, taken together, tell us about where the same classes of bugs keep recurring?* Recurring CWE patterns aren't individual vulnerability problems — they're systemic coding practice problems that SAST rules should catch before code ships.
+PSIRT teams triage CVEs one at a time. This tool steps back and asks: *what do 183 advisories, taken together, tell us about where the same classes of bugs keep recurring?* Recurring CWE patterns aren't individual vulnerability problems — they're systemic coding practice problems that SAST rules should catch before code ships.
 
 **The feedback loop**: Advisories → Pattern Analysis → Prevention Rules
 
@@ -125,8 +125,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python agent.py
 
 ## What It Does
 
-1. **Scrapes** all 181 published Arista EOS security advisories (CSAF JSON + advisory detail pages)
-2. **Enriches** 345 CVEs with NVD (CVSS vectors, CWE IDs), EPSS (exploitability probability), and CISA KEV (active exploitation) data
+1. **Scrapes** all 183 published Arista security advisories (CSAF JSON + advisory detail pages)
+2. **Enriches** 346 CVEs with NVD (CVSS vectors, CWE IDs), EPSS (exploitability probability), and CISA KEV (active exploitation) data
 3. **Classifies** each advisory with Claude AI — affected EOS component, attack surface (management/control/data plane), vulnerability category, root cause, mitigation quality
 4. **Analyzes** patterns across the full history: CWE clustering, component heat maps, severity distribution, yearly trends, CVSS vs EPSS scatter
 5. **Generates** AI-powered program-level insights with specific SDLC recommendations
@@ -184,7 +184,7 @@ python main.py serve
 │    Analysis  │ 6 interactive charts (CWE, severity, trend...)   │
 │    Insights  │ AI-generated SDLC recommendations                │
 │    SAST Rules│ Semgrep rules grouped by CWE + Export YAML       │
-│    Advisories│ Searchable/filterable table of all 181           │
+│    Advisories│ Searchable/filterable table of all 183           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -250,32 +250,35 @@ advisory-intel/
 
 **4 tables** in SQLite with WAL mode:
 
-- `advisories` — 181 records: id, title, url, published_date, description, affected_products
-- `cves` — 345 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
-- `ai_classifications` — 174 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
+- `advisories` — 183 records: id, title, url, published_date, description, affected_products
+- `cves` — 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
+- `ai_classifications` — 178 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
 - `semgrep_rules` — 9 records: cwe_id, cwe_name, rule_id, rule_yaml, rationale
 
 ## Data Coverage
 
 | Metric | Count |
 |--------|-------|
-| Advisories scraped | 181 |
-| CVEs tracked | 345 |
-| NVD enriched (CVSS/CWE) | 120 (from NVD) + 121 (from CSAF/detail pages) |
-| With CVSS scores | 241 (70%) |
-| With CWE IDs | 202 (59%) |
-| With EPSS scores | 333 (97%) |
-| In CISA KEV | 11 |
-| AI classified | 174 (96%) |
+| Advisories scraped | 183 |
+| CVEs tracked | 346 |
+| NVD enriched (CVSS/CWE) | 121 (from NVD) + 121 (from CSAF/detail pages) |
+| With CVSS scores | 242 (70%) |
+| With CWE IDs | 203 (59%) |
+| With EPSS scores | 334 (97%) |
+| In CISA KEV | 12 |
+| AI classified | 178 (97%) |
 | Semgrep rules generated | 9 (covering 6 CWE categories) |
 
 ## Key Findings (from the data)
 
-- **CWE-78 (OS Command Injection)** is the #1 recurring weakness — 11 occurrences, avg CVSS 8.2
-- **81% of vulnerabilities** are network-accessible with low complexity and no authentication required
-- **Management plane** is the dominant attack surface (75 of 174 classified advisories)
-- **11 CVEs** appear in CISA's Known Exploited Vulnerabilities catalog (actively exploited in the wild)
-- **2024-2026 shows a 3x acceleration** in advisory volume vs historical baseline
+- **KEV status has to override the scores.** 4 Arista CVEs were added to CISA KEV in 2026; 3 of the 4 have EPSS under 0.02, and one (SA-0137) is CVSS 5.8. Of 30 CVEs scored CVSS 9 or higher, only 4 are in KEV.
+- **CWE-78 (OS Command Injection)** is the #1 recurring weakness: 11 occurrences, avg CVSS 8.2. 8 of the 11 were published in 2026, mostly in the NG Firewall and VeloCloud product lines.
+- **VeloCloud Orchestrator on-prem** had two CVSS 10.0, KEV-listed issues eight weeks apart (SA-0144, SA-0183) with the same described impact.
+- **82% of CVEs with full CVSS vectors are network-reachable** (94 of 115); 45% (52 of 115) are also low complexity with no privileges required.
+- **Management plane** is the dominant attack surface (79 of 178 classified advisories).
+- **Advisory volume is up sharply:** 2014 to 2024 averaged about 8 advisories a year; 2025 had 29 and 2026 had 51 through September.
+
+Data as of 2026-10-01 (through SA-0184).
 
 ## Tech Stack
 
