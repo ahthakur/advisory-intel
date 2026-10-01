@@ -63,6 +63,7 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │                    ├──▶ enrich_cves              (src/enricher)  │
 │                    ├──▶ classify_advisories      (src/ai)        │
 │                    ├──▶ query_advisory_db        (src/db)        │
+│                    ├──▶ run_sql (read-only)      (src/agent)     │
 │                    ├──▶ analyze_patterns         (src/analyzer)  │
 │                    ├──▶ generate_insights        (src/ai)        │
 │                    ├──▶ generate_semgrep_rules   (src/rules)     │
@@ -100,24 +101,51 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │  Multi-Step Reasoning ····· Can it chain tools for complex Qs?   │
 │  Escalation Judgment ······ Does it prioritize correctly?        │
 │  Cross-Project Bridge ····· Does it bridge advisory + infra?     │
+│  Numeric Accuracy ········· Are counts exact (SQL ground truth)? │
 │                                                                  │
-│  Result: 15/16 passed (94%)                                      │
+│  Result: 25/26 passed on 2026-10-01 (see below)                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Running Evals
 
 ```bash
-python -m evals.eval_agent            # Full suite (16 tests, ~4 min)
+python -m evals.eval_agent            # Full suite (26 tests, about $0.56, own $1.00 cap)
 python -m evals.eval_agent --quick    # Tool selection only
+python -m evals.eval_agent --numeric  # Counting questions vs SQL ground truth
 # Results saved to data/eval_results.json
 ```
+
+The one failure in the last full run was the infrastructure-scan case with Docker
+stopped: the agent correctly said the scanner was "unavailable", which the test
+didn't accept yet. That phrase is now accepted.
+
+### Why the agent has a SQL tool
+
+LLMs miscount. Asked how many advisories have a CVE in CISA KEV, the agent once
+answered 7 while listing all 9: it was deduplicating and counting tool output in
+its head. The fix is structural, not a patch per question:
+
+- `run_sql` gives the agent read-only SQL (SQLite `mode=ro` + `query_only`, one
+  SELECT per call, row cap, query timeout), with schema notes such as "count
+  advisories with COUNT(DISTINCT advisory_id)".
+- The system prompt forbids computing numbers; every number must come from a
+  tool result, and the agent shows the SQL it ran.
+- `--numeric` checks 10 counting questions against SQL ground truth.
+
+| Setup | Numeric evals passed | Cost of the 10 questions |
+|---|---|---|
+| Before: no SQL tool, no rule | 4 / 10 | $0.15 |
+| After: `run_sql` + rule | 10 / 10 | $0.08 |
+
+The remaining risk is a wrong query rather than wrong arithmetic, and the SQL
+is shown so a person can check it.
 
 ### OTEL Tracing
 
 ```bash
-# Console tracing (default — for demos)
-python agent.py "What are the top CWE patterns?"
+# Spans go to data/agent_traces.log by default; print them live with:
+OTEL_CONSOLE=1 python agent.py "What are the top CWE patterns?"
 
 # Send traces to Grafana/Tempo
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python agent.py
@@ -200,7 +228,7 @@ python main.py serve
 | `python main.py serve` | Start the dashboard (default: port 8000) |
 | `python agent.py` | Interactive agentic analyst (Strands) |
 | `python agent.py "query"` | Single-query agent mode |
-| `python -m evals.eval_agent` | Run full eval suite (16 tests) |
+| `python -m evals.eval_agent` | Run full eval suite (26 tests) |
 | `python -m evals.eval_agent --quick` | Run tool selection evals only |
 
 ## Project Structure
@@ -221,11 +249,11 @@ advisory-intel/
 │   ├── detail_batch_latest.json     # SA-0173 to SA-0182 detail extractions
 │   └── detail_batch_all.json        # SA-0001 to SA-0172 detail extractions
 ├── evals/
-│   └── eval_agent.py                # 6-category eval suite (16 test cases)
+│   └── eval_agent.py                # 7-category eval suite (26 test cases)
 └── src/
     ├── db.py                        # SQLite schema (4 tables)
     ├── agent/
-    │   ├── tools.py                 # 9 @tool wrappers for Strands agent
+    │   ├── tools.py                 # 10 @tool wrappers for Strands agent
     │   └── tracing.py               # OTEL tracing (console + OTLP export)
     ├── scraper/
     │   └── arista.py                # CSAF JSON + advisory list scraper

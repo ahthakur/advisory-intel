@@ -522,11 +522,31 @@ def cross_reference_advisory_with_infrastructure(cwe_id: Optional[str] = None) -
     return "\n".join(lines)
 
 
+def run_sql(sql: str) -> str:
+    # Docstring is set below so the schema notes live in one place (sql_tool.py)
+    from src.agent.sql_tool import run_readonly_sql
+    return json.dumps(run_readonly_sql(sql), default=str)
+
+
+run_sql.__doc__ = f"""Run one read-only SQL SELECT against the advisory database.
+
+Use this for every count, total, average, percentage, or ranking you report.
+The database computes the number; quote it exactly, and show the SQL you ran.
+Returns JSON with columns, rows (max 100), and the SQL, or an error to fix and retry.
+
+{__import__("src.agent.sql_tool", fromlist=["SCHEMA_NOTES"]).SCHEMA_NOTES}
+Args:
+    sql: A single SQLite SELECT or WITH statement.
+"""
+run_sql = tool(run_sql)
+
+
 ALL_TOOLS = [
     scrape_advisories,
     enrich_cves,
     classify_advisories,
     query_advisory_db,
+    run_sql,
     analyze_patterns,
     generate_insights,
     generate_semgrep_rules,

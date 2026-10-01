@@ -78,6 +78,7 @@ class AgentBudgetHook:
         self.model = model
         self.max_tokens = max_tokens
         self.budget = budget or RunBudget()
+        self.cancelled_calls = 0
 
     def register_hooks(self, registry, **kwargs):
         from strands.hooks import AfterModelCallEvent, BeforeModelCallEvent
@@ -91,6 +92,7 @@ class AgentBudgetHook:
             input_tokens = len(str(event.agent.messages)) / 3 + 2000
         if self.budget.would_exceed(self.model, input_tokens, self.max_tokens):
             event.cancel = self.budget.stop_message()
+            self.cancelled_calls += 1
 
     def _after(self, event):
         if event.stop_response is None:

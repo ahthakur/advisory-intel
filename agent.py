@@ -34,6 +34,7 @@ You have access to these capabilities:
 - **enrich_cves**: Enrich CVEs with NVD (CVSS), EPSS (exploit probability), and CISA KEV data
 - **classify_advisories**: Use AI to classify advisories by attack surface, root cause, and component
 - **query_advisory_db**: Query the intelligence database for patterns, trends, specific CVEs/advisories
+- **run_sql**: Run a read-only SQL SELECT against the database; use it for any number you report
 - **analyze_patterns**: Run comprehensive pattern analysis (CWE distribution, severity, trends)
 - **generate_insights**: Generate AI-powered program-level insights with SDLC recommendations
 - **generate_semgrep_rules**: Generate Semgrep SAST rules from recurring CWE patterns
@@ -41,6 +42,11 @@ You have access to these capabilities:
 - **cross_reference_advisory_with_infrastructure**: Map advisory CWE patterns to infrastructure compliance gaps — the full closed-loop
 
 ## How to operate
+
+0. **Never compute numbers yourself.** Do not count, add, average, or deduplicate items \
+from tool output in your head. Every count, total, average, or percentage in your answer \
+must come from a run_sql result (or appear verbatim in another tool's output). If you need \
+a number you don't have, write a query. After the answer, show the SQL you ran.
 
 1. **Answer questions by querying data first.** Never guess — always use query_advisory_db \
 or analyze_patterns to get real numbers before responding.
@@ -76,7 +82,7 @@ compliance state to find where advisory-identified weaknesses AND infrastructure
 overlap — that's where real risk lives."""
 
 
-def create_agent() -> Agent:
+def create_agent(budget=None) -> Agent:
     """Create the advisory-intel agent with Anthropic model and pipeline tools."""
     model_id = "claude-haiku-4-5-20251001"
     max_tokens = 8192
@@ -84,12 +90,15 @@ def create_agent() -> Agent:
         model_id=model_id,
         max_tokens=max_tokens,
     )
-    return Agent(
+    budget_hook = AgentBudgetHook(model_id, max_tokens, budget)
+    agent = Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=ALL_TOOLS,
-        hooks=[AgentBudgetHook(model_id, max_tokens)],
+        hooks=[budget_hook],
     )
+    agent.budget_hook = budget_hook  # lets callers report spend
+    return agent
 
 
 def run_interactive(agent: Agent):

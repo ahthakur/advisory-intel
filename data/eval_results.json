@@ -1,119 +1,189 @@
 {
-  "timestamp": "2026-10-01T20:50:51Z",
-  "total": 16,
-  "passed": 16,
+  "timestamp": "2026-10-01T21:31:03Z",
+  "total": 26,
+  "passed": 25,
   "results": [
     {
       "name": "Tool select: How many advisories are in the database?",
       "passed": true,
-      "details": "Correctly called query_advisory_db",
-      "duration": 2.91,
+      "details": "Correctly called ['query_advisory_db', 'run_sql']",
+      "duration": 1.63,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: What are the top recurring CWE patterns?",
       "passed": true,
       "details": "Correctly called ['query_advisory_db', 'analyze_patterns']",
-      "duration": 12.17,
+      "duration": 8.78,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Scrape the latest advisories from Arista",
       "passed": true,
       "details": "Correctly called scrape_advisories",
-      "duration": 4.04,
+      "duration": 4.17,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Generate Semgrep rules for CWE-78",
       "passed": true,
       "details": "Correctly called generate_semgrep_rules",
-      "duration": 6.16,
+      "duration": 6.39,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Which CVEs are in the CISA KEV catalog?",
       "passed": true,
-      "details": "Correctly called query_advisory_db",
-      "duration": 7.94,
+      "details": "Correctly called ['query_advisory_db', 'run_sql']",
+      "duration": 7.73,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Classify advisory SA-0078",
       "passed": true,
       "details": "Correctly called classify_advisories",
-      "duration": 6.06,
+      "duration": 6.1,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: What is the yearly trend in advisory severity?",
       "passed": true,
       "details": "Correctly called ['query_advisory_db', 'analyze_patterns']",
-      "duration": 12.85,
+      "duration": 8.83,
       "category": "Tool Selection"
     },
     {
       "name": "Tool select: Run the full pattern analysis",
       "passed": true,
       "details": "Correctly called analyze_patterns",
-      "duration": 15.59,
+      "duration": 18.32,
       "category": "Tool Selection"
     },
     {
       "name": "Accurate advisory/CVE count",
       "passed": true,
       "details": "Expected 183 advisories, 346 CVEs in response",
-      "duration": 3.96,
+      "duration": 2.54,
       "category": "Data Accuracy"
     },
     {
       "name": "Accurate KEV count",
       "passed": true,
       "details": "Expected 12 KEV CVEs in response",
-      "duration": 7.81,
+      "duration": 3.22,
       "category": "Data Accuracy"
     },
     {
       "name": "Reject nonexistent CVE (CVE-2099-99999)",
       "passed": true,
-      "details": "Response should indicate CVE not found. Got: **cve-2099-99999 is not found in the arista advisory database.**\n\nthe cve id you provided doesn't ex",
-      "duration": 4.2,
+      "details": "Response should indicate CVE not found. Got: **cve-2099-99999 is not in the database.** \n\nthis cve is not associated with any arista advisories t",
+      "duration": 3.11,
       "category": "Hallucination Resistance"
     },
     {
       "name": "Reject nonexistent advisory (SA-9999)",
       "passed": true,
-      "details": "Response should indicate advisory not found. Got: based on the query results, **sa-9999 does not exist** in the arista psirt advisory database.\n\nthe d",
-      "duration": 4.16,
+      "details": "Response should indicate advisory not found. Got: advisory **sa-9999 does not exist** in the database. the query returned advisories from the system, ",
+      "duration": 3.34,
       "category": "Hallucination Resistance"
     },
     {
       "name": "Cross-reference CWE patterns with rule coverage",
       "passed": true,
       "details": "Should reference CWE IDs and coverage status. CWE ref: True, Coverage analysis: True",
-      "duration": 10.54,
+      "duration": 6.1,
       "category": "Multi-Step Reasoning"
     },
     {
       "name": "Prioritize using multiple risk signals",
       "passed": true,
       "details": "KEV: True, CVSS: True, EPSS: True. Should use >=2 signals.",
-      "duration": 17.52,
+      "duration": 17.12,
       "category": "Escalation Judgment"
     },
     {
       "name": "Infrastructure scan returns container data",
-      "passed": true,
-      "details": "Should reference containers or findings. Got: unfortunately, i'm unable to scan the live infrastructure at this moment. the complianceguard module is not properly ini",
-      "duration": 4.62,
+      "passed": false,
+      "details": "Should reference containers or findings. Got: **infrastructure scan result:**\n\nthe complianceguard infrastructure scanner is currently unavailable. the system reports",
+      "duration": 4.6,
       "category": "Cross-Project Bridge"
     },
     {
       "name": "Cross-reference CWE patterns with infrastructure",
       "passed": true,
       "details": "CWE ref: True, Infra ref: True, Mapping: True",
-      "duration": 22.81,
+      "duration": 40.96,
       "category": "Cross-Project Bridge"
+    },
+    {
+      "name": "Numeric: How many distinct advisories have at least one CVE in the CI",
+      "passed": true,
+      "details": "Expected 9; run_sql used: True",
+      "duration": 2.94,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many CVEs have a CVSS score of 9.0 or higher?",
+      "passed": true,
+      "details": "Expected 30; run_sql used: True",
+      "duration": 2.54,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many advisories were published in 2026?",
+      "passed": true,
+      "details": "Expected 51; run_sql used: True",
+      "duration": 2.78,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many CVEs are tagged CWE-78?",
+      "passed": true,
+      "details": "Expected 11; run_sql used: True",
+      "duration": 3.37,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many advisories are classified as management-plane?",
+      "passed": true,
+      "details": "Expected 81; run_sql used: True",
+      "duration": 2.92,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many CVEs have an EPSS score of 0.5 or higher?",
+      "passed": true,
+      "details": "Expected 61; run_sql used: True",
+      "duration": 2.2,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many advisories have more than one CVE?",
+      "passed": true,
+      "details": "Expected 47; run_sql used: True",
+      "duration": 3.42,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many KEV-listed CVEs have an EPSS score below 0.1?",
+      "passed": true,
+      "details": "Expected 3; run_sql used: True",
+      "duration": 2.56,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: How many distinct CWE IDs appear across all CVEs?",
+      "passed": true,
+      "details": "Expected 87; run_sql used: True",
+      "duration": 3.67,
+      "category": "Numeric Accuracy"
+    },
+    {
+      "name": "Numeric: What is the average CVSS score of KEV-listed CVEs, rounded t",
+      "passed": true,
+      "details": "Expected 8.5; run_sql used: True",
+      "duration": 3.64,
+      "category": "Numeric Accuracy"
     }
   ]
 }

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -73,7 +74,7 @@ class EvalSuite:
 TOOL_SELECTION_CASES = [
     {
         "query": "How many advisories are in the database?",
-        "expected_tool": "query_advisory_db",
+        "expected_tool": ["query_advisory_db", "run_sql"],
         "not_expected": ["scrape_advisories", "enrich_cves", "classify_advisories"],
         "reason": "Simple count question should query the DB, not trigger pipeline stages",
     },
@@ -97,7 +98,7 @@ TOOL_SELECTION_CASES = [
     },
     {
         "query": "Which CVEs are in the CISA KEV catalog?",
-        "expected_tool": "query_advisory_db",
+        "expected_tool": ["query_advisory_db", "run_sql"],
         "not_expected": ["scrape_advisories", "generate_semgrep_rules"],
         "reason": "KEV query should search existing data",
     },
@@ -249,6 +250,81 @@ def eval_data_accuracy(agent) -> list[EvalResult]:
 # ---------------------------------------------------------------------------
 # Category 3: Hallucination Resistance — does the agent refuse to fabricate?
 # ---------------------------------------------------------------------------
+
+NUMERIC_CASES = [
+    # (question, ground-truth SQL). Truth is computed at eval time, so the
+    # cases stay valid as the data changes.
+    ("How many distinct advisories have at least one CVE in the CISA KEV catalog?",
+     "SELECT COUNT(DISTINCT advisory_id) FROM cves WHERE kev_listed = 1"),
+    ("How many CVEs have a CVSS score of 9.0 or higher?",
+     "SELECT COUNT(*) FROM cves WHERE cvss_score >= 9.0"),
+    ("How many advisories were published in 2026?",
+     "SELECT COUNT(*) FROM advisories WHERE published_date LIKE '%2026%'"),
+    ("How many CVEs are tagged CWE-78?",
+     "SELECT COUNT(*) FROM cves WHERE cwe_id = 'CWE-78'"),
+    ("How many advisories are classified as management-plane?",
+     "SELECT COUNT(*) FROM ai_classifications WHERE attack_surface = 'management-plane'"),
+    ("How many CVEs have an EPSS score of 0.5 or higher?",
+     "SELECT COUNT(*) FROM cves WHERE epss_score >= 0.5"),
+    ("How many advisories have more than one CVE?",
+     "SELECT COUNT(*) FROM (SELECT advisory_id FROM cves GROUP BY advisory_id HAVING COUNT(*) > 1)"),
+    ("How many KEV-listed CVEs have an EPSS score below 0.1?",
+     "SELECT COUNT(*) FROM cves WHERE kev_listed = 1 AND epss_score < 0.1"),
+    ("How many distinct CWE IDs appear across all CVEs?",
+     "SELECT COUNT(DISTINCT cwe_id) FROM cves WHERE cwe_id IS NOT NULL"),
+    ("What is the average CVSS score of KEV-listed CVEs, rounded to one decimal place?",
+     "SELECT ROUND(AVG(cvss_score), 1) FROM cves WHERE kev_listed = 1"),
+]
+
+
+def _tools_called(messages) -> list[str]:
+    names = []
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            for content in msg.get("content", []):
+                if isinstance(content, dict) and isinstance(content.get("toolUse"), dict):
+                    names.append(content["toolUse"]["name"])
+    return names
+
+
+def eval_numeric_accuracy(agent) -> list[EvalResult]:
+    """Counting and arithmetic questions, checked against SQL ground truth.
+
+    Passes only if the exact number appears in the answer. This catches the
+    model doing arithmetic in its head (it once reported 7 KEV advisories
+    while listing 9).
+    """
+    results = []
+    conn = get_connection()
+    truths = [conn.execute(sql).fetchone()[0] for _, sql in NUMERIC_CASES]
+    conn.close()
+
+    for (question, _), truth in zip(NUMERIC_CASES, truths):
+        expected = f"{truth:.1f}" if isinstance(truth, float) else str(truth)
+        start = time.time()
+        try:
+            agent.messages.clear()  # each case starts fresh; shared history multiplies cost
+            response = agent(question + " Give the exact number.")
+            text = str(response)
+            found = re.search(rf"(?<![\d.]){re.escape(expected)}(?![\d]|\.\d)", text) is not None
+            used_sql = "run_sql" in _tools_called(agent.messages)
+            results.append(EvalResult(
+                name=f"Numeric: {question[:60]}",
+                passed=found,
+                details=f"Expected {expected}; run_sql used: {used_sql}",
+                duration=time.time() - start,
+                category="Numeric Accuracy",
+            ))
+        except Exception as e:
+            results.append(EvalResult(
+                name=f"Numeric: {question[:60]}",
+                passed=False,
+                details=f"Exception: {e}",
+                duration=time.time() - start,
+                category="Numeric Accuracy",
+            ))
+    return results
+
 
 def eval_hallucination_resistance(agent) -> list[EvalResult]:
     """Test that the agent doesn't fabricate data for nonexistent entries."""
@@ -422,7 +498,7 @@ def eval_cross_project(agent) -> list[EvalResult]:
         resp_text = str(response).lower()
         has_scan_data = any(
             phrase in resp_text
-            for phrase in ["container", "finding", "violation", "compliant", "scanned", "not available", "cannot connect"]
+            for phrase in ["container", "finding", "violation", "compliant", "scanned", "not available", "unavailable", "cannot connect"]
         )
         results.append(EvalResult(
             name="Infrastructure scan returns container data",
@@ -482,7 +558,7 @@ def eval_cross_project(agent) -> list[EvalResult]:
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_all_evals(quick: bool = False):
+def run_all_evals(quick: bool = False, numeric_only: bool = False):
     """Run the full eval suite."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY required for evals.")
@@ -494,55 +570,89 @@ def run_all_evals(quick: bool = False):
     # Import here to avoid import errors if strands not installed
     from agent import create_agent
 
-    print("Creating agent for evaluation...")
-    agent = create_agent()
+    # The full suite runs ~26 agent conversations, so it gets its own cap
+    # (default $1.00, override with EVAL_BUDGET_USD); --quick and --numeric
+    # keep the normal per-run cap.
+    from src.ai.budget import RunBudget
+    budget = None
+    if not quick and not numeric_only:
+        budget = RunBudget(float(os.environ.get("EVAL_BUDGET_USD", "1.00")))
 
-    if quick:
+    print("Creating agent for evaluation...")
+    agent = create_agent(budget)
+    print(f"Claude budget for this run: ${agent.budget_hook.budget.cap_usd:.2f}")
+
+    seen = {"cancelled": 0}
+
+    def record(result: EvalResult):
+        # A case the budget cap cut off is not an agent failure; say so
+        if agent.budget_hook.cancelled_calls > seen["cancelled"]:
+            seen["cancelled"] = agent.budget_hook.cancelled_calls
+            result.details = f"SKIPPED: budget cap reached. {result.details}"
+        suite.add(result)
+
+    if numeric_only:
+        print("Running numeric accuracy evals...\n")
+        for result in eval_numeric_accuracy(agent):
+            record(result)
+            icon = "PASS" if result.passed else "FAIL"
+            print(f"  [{icon}] {result.name}  ({result.details})")
+    elif quick:
         print("Running quick evals (tool selection only)...\n")
         for result in eval_tool_selection(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"  [{icon}] {result.name}")
     else:
         print("Running full eval suite...\n")
 
-        print("  [1/6] Tool Selection")
+        print("  [1/7] Tool Selection")
         for result in eval_tool_selection(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [2/6] Data Accuracy")
+        print("  [2/7] Data Accuracy")
         for result in eval_data_accuracy(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [3/6] Hallucination Resistance")
+        print("  [3/7] Hallucination Resistance")
         for result in eval_hallucination_resistance(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [4/6] Multi-Step Reasoning")
+        print("  [4/7] Multi-Step Reasoning")
         for result in eval_multi_step(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [5/6] Escalation Judgment")
+        print("  [5/7] Escalation Judgment")
         for result in eval_escalation_judgment(agent):
-            suite.add(result)
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
-        print("  [6/6] Cross-Project Bridge")
+        print("  [6/7] Cross-Project Bridge")
         for result in eval_cross_project(agent):
-            suite.add(result)
+            record(result)
+            icon = "PASS" if result.passed else "FAIL"
+            print(f"    [{icon}] {result.name}")
+
+    if numeric_only:
+        pass
+    elif not quick:
+        print("  [7/7] Numeric Accuracy")
+        for result in eval_numeric_accuracy(agent):
+            record(result)
             icon = "PASS" if result.passed else "FAIL"
             print(f"    [{icon}] {result.name}")
 
     print(suite.summary())
+    print(f"  Claude spend: {agent.budget_hook.budget.summary()}")
 
     # Write results to JSON for tracking
     results_data = {
@@ -569,5 +679,4 @@ def run_all_evals(quick: bool = False):
 
 
 if __name__ == "__main__":
-    quick = "--quick" in sys.argv
-    run_all_evals(quick=quick)
+    run_all_evals(quick="--quick" in sys.argv, numeric_only="--numeric" in sys.argv)
