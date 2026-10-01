@@ -91,17 +91,15 @@ def classify_advisory(advisory_id: str, budget: RunBudget | None = None) -> dict
     )
     budget.record(MODEL, resp.usage)
 
-    try:
-        text = resp.content[0].text
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-        result = json.loads(text)
-    except (json.JSONDecodeError, IndexError):
+    result = _parse_classification(resp.content[0].text if resp.content else "")
+    if result is None:
+        print(f"    Unparseable response for {advisory_id}; left unclassified")
         return None
 
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()
+    # One row per advisory: reclassifying replaces the old row
+    conn.execute("DELETE FROM ai_classifications WHERE advisory_id = ?", (advisory_id,))
     conn.execute(
         """INSERT INTO ai_classifications
            (advisory_id, affected_component, attack_surface, vulnerability_category,
@@ -119,6 +117,43 @@ def classify_advisory(advisory_id: str, budget: RunBudget | None = None) -> dict
     )
     conn.commit()
     conn.close()
+    return result
+
+
+CLASSIFICATION_FIELDS = (
+    "affected_component", "attack_surface", "vulnerability_category",
+    "root_cause_category", "mitigation_quality",
+)
+
+
+def _parse_classification(text: str) -> dict | None:
+    """Pull the classification object out of a model response.
+
+    Handles code fences, prose around the JSON, a one-element array, and
+    list values (joined into one string).
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        # Prose around the JSON, or several objects in a row: take the first one
+        start = text.find("{")
+        if start == -1:
+            return None
+        try:
+            result, _ = json.JSONDecoder().raw_decode(text[start:])
+        except json.JSONDecodeError:
+            return None
+    if isinstance(result, list):
+        result = next((r for r in result if isinstance(r, dict)), None)
+    if not isinstance(result, dict):
+        return None
+    for field in CLASSIFICATION_FIELDS:
+        value = result.get(field)
+        if isinstance(value, list):
+            result[field] = ", ".join(str(v) for v in value)
     return result
 
 

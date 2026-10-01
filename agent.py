@@ -65,7 +65,9 @@ and CISA KEV (Known Exploited Vulnerabilities) status. AI classifications tag ea
 with affected component, attack surface, vulnerability category, and root cause. Semgrep \
 rules are generated from the most recurring CWE patterns to prevent future occurrences.
 
-This is a PSIRT-to-SDLC feedback loop: past vulnerabilities drive prevention rules.
+This is a PSIRT-to-SDLC feedback loop: past vulnerabilities drive prevention rules. \
+Generated Semgrep rules are starting templates; they are not deployed in any CI pipeline, \
+so never describe them as active or running in CI.
 
 You also have access to ComplianceGuard, which scans live Docker containers against \
 security policies (privileged mode, capabilities, read-only filesystem, no-new-privileges). \
@@ -112,8 +114,10 @@ def run_interactive(agent: Agent):
             break
 
         try:
-            response = agent(user_input)
-            print(f"\nAgent > {response}\n")
+            # The agent streams its answer as it goes; just add spacing after
+            print("\nAgent > ", end="")
+            agent(user_input)
+            print("\n")
         except Exception as e:
             print(f"\nError: {e}\n")
 
@@ -138,7 +142,7 @@ def main():
                 span.set_attribute("agent.mode", "single")
                 response = agent(query)
                 span.set_attribute("agent.response_length", len(str(response)))
-                print(response)
+                print()
         else:
             run_interactive(agent)
     finally:

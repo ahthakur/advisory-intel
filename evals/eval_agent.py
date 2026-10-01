@@ -79,7 +79,7 @@ TOOL_SELECTION_CASES = [
     },
     {
         "query": "What are the top recurring CWE patterns?",
-        "expected_tool": "query_advisory_db",
+        "expected_tool": ["query_advisory_db", "analyze_patterns"],
         "not_expected": ["scrape_advisories"],
         "reason": "Pattern question should query existing data",
     },
@@ -109,7 +109,7 @@ TOOL_SELECTION_CASES = [
     },
     {
         "query": "What is the yearly trend in advisory severity?",
-        "expected_tool": "query_advisory_db",
+        "expected_tool": ["query_advisory_db", "analyze_patterns"],
         "not_expected": ["scrape_advisories", "classify_advisories"],
         "reason": "Trend question should query historical data",
     },
@@ -150,7 +150,9 @@ def eval_tool_selection(agent) -> list[EvalResult]:
                                     tool_calls.append(content["name"])
 
             expected = case["expected_tool"]
-            called_expected = expected in tool_calls
+            # A case may accept several tools that can each answer the question
+            accepted = expected if isinstance(expected, list) else [expected]
+            called_expected = any(t in tool_calls for t in accepted)
 
             # Check no forbidden tools were called
             forbidden_called = [t for t in case.get("not_expected", []) if t in tool_calls]

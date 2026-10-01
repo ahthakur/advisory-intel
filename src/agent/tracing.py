@@ -8,6 +8,7 @@ to send traces to Grafana/Tempo/Jaeger.
 """
 
 import os
+import sys
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -40,9 +41,9 @@ def initialize_tracing() -> None:
                 BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
             )
         except ImportError:
-            _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+            _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stderr)))
     else:
-        _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stderr)))
 
     trace.set_tracer_provider(_tracer_provider)
 

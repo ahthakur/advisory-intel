@@ -252,7 +252,7 @@ advisory-intel/
 
 - `advisories` — 183 records: id, title, url, published_date, description, affected_products
 - `cves` — 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
-- `ai_classifications` — 178 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
+- `ai_classifications` — 183 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
 - `semgrep_rules` — 9 records: cwe_id, cwe_name, rule_id, rule_yaml, rationale
 
 ## Data Coverage
@@ -266,7 +266,7 @@ advisory-intel/
 | With CWE IDs | 203 (59%) |
 | With EPSS scores | 334 (97%) |
 | In CISA KEV | 12 |
-| AI classified | 178 (97%) |
+| AI classified | 183 (100%) |
 | Semgrep rules generated | 9 (covering 6 CWE categories) |
 
 ## Key Findings (from the data)
@@ -275,7 +275,7 @@ advisory-intel/
 - **CWE-78 (OS Command Injection)** is the #1 recurring weakness: 11 occurrences, avg CVSS 8.2. 8 of the 11 were published in 2026, mostly in the NG Firewall and VeloCloud product lines.
 - **VeloCloud Orchestrator on-prem** had two CVSS 10.0, KEV-listed issues eight weeks apart (SA-0144, SA-0183) with the same described impact.
 - **82% of CVEs with full CVSS vectors are network-reachable** (94 of 115); 45% (52 of 115) are also low complexity with no privileges required.
-- **Management plane** is the dominant attack surface (79 of 178 classified advisories).
+- **Management plane** is the dominant attack surface (81 of 183 classified advisories).
 - **Advisory volume is up sharply:** 2014 to 2024 averaged about 8 advisories a year; 2025 had 29 and 2026 had 51 through September.
 
 Data as of 2026-10-01 (through SA-0184).
