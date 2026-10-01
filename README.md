@@ -1,16 +1,16 @@
 # Advisory Intel
 
-**Arista PSIRT Advisory Intelligence Platform** — Analyzes Arista's entire public security advisory history to surface recurring weakness patterns (CWE clustering, component heat maps, severity vs exploitability trends) and closes the feedback loop to prevention via Semgrep SAST rules.
+**Arista PSIRT Advisory Intelligence Platform.** It analyzes Arista's entire public security advisory history to surface recurring weakness patterns (CWE clustering, component heat maps, severity vs exploitability trends) and closes the feedback loop to prevention via Semgrep SAST rules.
 
 ## The Thesis
 
-PSIRT teams triage CVEs one at a time. This tool steps back and asks: *what do 183 advisories, taken together, tell us about where the same classes of bugs keep recurring?* Recurring CWE patterns aren't individual vulnerability problems — they're systemic coding practice problems that SAST rules should catch before code ships.
+PSIRT teams triage CVEs one at a time. This tool steps back and asks: *what do 183 advisories, taken together, tell us about where the same classes of bugs keep recurring?* Recurring CWE patterns aren't individual vulnerability problems; they're systemic coding practice problems that SAST rules should catch before code ships.
 
 **The feedback loop**: Advisories → Pattern Analysis → Prevention Rules
 
 ## Agentic Mode (Strands Agents)
 
-The platform has two modes: a **batch pipeline** for ETL runs, and an **autonomous agent** that wraps the same pipeline stages as tools and reasons about which to invoke based on natural language queries.
+The platform has two modes: a deterministic **batch pipeline** for ETL runs (same input, same output, auditable), and a **tool-using agent** that wraps the same pipeline stages as tools and decides which to call, and in what order, to answer a plain-English question. The agent is read-mostly on purpose: it queries and analyzes, and anything that would change state belongs behind a human approval step.
 
 ```bash
 # Set up Python 3.10+ venv (required for Strands SDK)
@@ -32,24 +32,28 @@ python agent.py "Which CWE patterns recur the most and which lack Semgrep covera
 | Runs all stages in fixed order | LLM decides which tools to call based on the question |
 | `python main.py pipeline` | "What new advisories match our top CWE patterns?" |
 | Same output every time | Chains tools, cross-references data, recommends actions |
-| No interaction | Conversational — ask follow-ups, drill into specifics |
+| No interaction | Conversational: ask follow-ups, drill into specifics |
 
-**Example session:**
+**Example (real output, 2026-10-01, trimmed):**
 
 ```
-You > Which CVEs should be top priority?
-Agent > [calls query_advisory_db] → [analyzes CVSS + EPSS + KEV signals]
+$ .venv/bin/python agent.py "How many distinct advisories have at least one CVE in CISA KEV, and which are they?"
+Tool #1: run_sql
+Let me fix that query:
+Tool #2: run_sql
+Tool #3: run_sql
 
-  TIER 0 (48h): CVE-2026-16812 (CVSS 10.0 + KEV + CWE-78),
-                CVE-2021-44228 (EPSS 0.99999 + KEV)
-  TIER 1 (7d):  CVE-2024-3094 (CVSS 10.0, EPSS 0.86)
-  ...
-  Recommendation: Patch TIER 0 immediately. Generate Semgrep rules
-  for the 4 uncovered CWE categories.
-
-You > Generate the rules for CWE-290
-Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML output
+9 distinct advisories have at least one CVE listed in CISA's KEV catalog:
+| SA-0004 | April 9th 2014     | CVE-2014-0160                              |
+| SA-0006 | September 29th 2014| CVE-2014-7169, CVE-2014-6278, CVE-2014-6271 |
+| SA-0070 | January 31st, 2022 | CVE-2021-44228, CVE-2021-45046             |
+| ...                                                                       |
+| SA-0183 | September 22, 2026 | CVE-2026-93952                             |
 ```
+
+The count comes from `COUNT(DISTINCT advisory_id)` in SQLite, not from the model
+reading rows (see "Why the agent has a SQL tool" below). Note the agent fixing
+its own failed query on the second call.
 
 ### Agent Architecture
 
@@ -72,7 +76,7 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │                         _with_infrastructure                     │
 │                                                                  │
 │  The LLM decides which tools to call and in what order.          │
-│  Tools wrap existing pipeline modules — no code rewrite needed.  │
+│  Tools wrap existing pipeline modules; no code rewrite needed.  │
 ├──────────────────────────────────────────────────────────────────┤
 │                  COMPLIANCEGUARD BRIDGE                           │
 │                                                                  │
@@ -84,11 +88,12 @@ Agent > [calls generate_semgrep_rules(cwe_filter="CWE-290")] → rule YAML outpu
 │  CWE-732 ──▶ read-only-root-filesystem                          │
 │                                                                  │
 │  Finds where advisory weakness patterns AND infrastructure      │
-│  compliance gaps overlap — that's where real risk lives.         │
+│  compliance gaps overlap; that's where real risk lives.         │
 ├──────────────────────────────────────────────────────────────────┤
 │                     OTEL TRACING                                 │
 │                                                                  │
-│  Agent ──▶ TracerProvider ──▶ ConsoleExporter (demo)             │
+│  Agent ──▶ TracerProvider ──▶ data/agent_traces.log (default)    │
+│                           ──▶ stderr (OTEL_CONSOLE=1)            │
 │                           ──▶ OTLPExporter   (Grafana/Tempo)    │
 │                                                                  │
 │  Every tool call, reasoning step, and query gets a trace span.  │
@@ -130,7 +135,8 @@ its head. The fix is structural, not a patch per question:
   SELECT per call, row cap, query timeout), with schema notes such as "count
   advisories with COUNT(DISTINCT advisory_id)".
 - The system prompt forbids computing numbers; every number must come from a
-  tool result, and the agent shows the SQL it ran.
+  tool result. Every query is recorded in the trace log, and the agent is told
+  to show its SQL (it doesn't always; the trace log is the reliable record).
 - `--numeric` checks 10 counting questions against SQL ground truth.
 
 | Setup | Numeric evals passed | Cost of the 10 questions |
@@ -138,8 +144,27 @@ its head. The fix is structural, not a patch per question:
 | Before: no SQL tool, no rule | 4 / 10 | $0.15 |
 | After: `run_sql` + rule | 10 / 10 | $0.08 |
 
-The remaining risk is a wrong query rather than wrong arithmetic, and the SQL
-is shown so a person can check it.
+The remaining risk is a wrong query rather than wrong arithmetic, and every
+query is in the trace log so a person can check it.
+
+## Cost Controls
+
+Claude calls are cheap here (Haiku 4.5; a full classification run of all 183
+advisories is about $0.25), but an agent loop or eval run can multiply that
+quickly. Every run is capped:
+
+- **$0.50 per run** for classification, the Insights tab, and each agent
+  session (`src/ai/budget.py`). Before each call, the worst case (estimated input
+  plus the full `max_tokens` of output) is checked against what the run has
+  already spent; if it could cross the cap, the call is not sent. Actual cost is
+  recorded from the API's token usage.
+- The full eval suite gets its own cap (default $1.00, `EVAL_BUDGET_USD`);
+  cases the cap cuts off are reported as SKIPPED, not FAIL.
+- Classification stops on the first API rejection (for example, a billing
+  error) instead of retrying every advisory.
+- Evals clear the agent's history between cases. A shared history resent every
+  earlier tool output on each call, which multiplied cost.
+- Override the per-run cap with `CLAUDE_RUN_BUDGET_USD`.
 
 ### OTEL Tracing
 
@@ -155,19 +180,20 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 python agent.py
 
 1. **Scrapes** all 183 published Arista security advisories (CSAF JSON + advisory detail pages)
 2. **Enriches** 346 CVEs with NVD (CVSS vectors, CWE IDs), EPSS (exploitability probability), and CISA KEV (active exploitation) data
-3. **Classifies** each advisory with Claude AI — affected EOS component, attack surface (management/control/data plane), vulnerability category, root cause, mitigation quality
+3. **Classifies** each advisory with Claude AI: affected EOS component, attack surface (management/control/data plane), vulnerability category, root cause, mitigation quality
 4. **Analyzes** patterns across the full history: CWE clustering, component heat maps, severity distribution, yearly trends, CVSS vs EPSS scatter
 5. **Generates** AI-powered program-level insights with specific SDLC recommendations
-6. **Produces** Semgrep SAST rules derived from the top recurring CWEs — the PSIRT-to-SDLC feedback loop
+6. **Produces** Semgrep SAST rules derived from the top recurring CWEs, closing the PSIRT-to-SDLC feedback loop
 
 ## Quick Start
 
 ```bash
 pip3 install -r requirements.txt
 
-# Set up API key for AI features (classification + insights)
+# Set up API key for AI features (classification, insights, agent)
 cp .env.example .env
-# Edit .env with your Anthropic API key
+# Edit .env with your Anthropic API key, then load it:
+set -a; . ./.env; set +a
 
 # Run the full pipeline
 python main.py pipeline
@@ -179,6 +205,16 @@ python main.py rules
 python main.py serve
 # Open http://localhost:8000
 ```
+
+### Refreshing the data
+
+Arista's site serves a bot challenge to scripted requests, now including the
+CSAF JSON files, so `python main.py scrape` works from cached link files
+(`data/advisory_list.json`, `data/csaf_links.json`). To pick up new advisories,
+extract the newest entries and their CSAF JSON through a real browser session
+(Playwright), add them to those files, then run `scrape`, `enrich`, and
+`classify`. Only new or unclassified records are processed, so a refresh costs
+cents.
 
 ## Architecture
 
@@ -230,6 +266,7 @@ python main.py serve
 | `python agent.py "query"` | Single-query agent mode |
 | `python -m evals.eval_agent` | Run full eval suite (26 tests) |
 | `python -m evals.eval_agent --quick` | Run tool selection evals only |
+| `python -m evals.eval_agent --numeric` | Run counting evals against SQL ground truth |
 
 ## Project Structure
 
@@ -242,10 +279,11 @@ advisory-intel/
 ├── data/
 │   ├── advisory_intel.db            # SQLite database (all state)
 │   ├── eval_results.json            # Latest eval run results
-│   ├── csaf_links.json              # 40 CSAF JSON download URLs
+│   ├── agent_traces.log             # Agent trace spans (not committed)
+│   ├── csaf_links.json              # 41 CSAF JSON download URLs
 │   ├── csaf_batch1.json             # Downloaded CSAF documents (batch 1)
 │   ├── csaf_batch2.json             # Downloaded CSAF documents (batch 2)
-│   ├── advisory_list.json           # 182 advisory summaries (all pages)
+│   ├── advisory_list.json           # 184 advisory summaries (all pages)
 │   ├── detail_batch_latest.json     # SA-0173 to SA-0182 detail extractions
 │   └── detail_batch_all.json        # SA-0001 to SA-0172 detail extractions
 ├── evals/
@@ -254,7 +292,8 @@ advisory-intel/
     ├── db.py                        # SQLite schema (4 tables)
     ├── agent/
     │   ├── tools.py                 # 10 @tool wrappers for Strands agent
-    │   └── tracing.py               # OTEL tracing (console + OTLP export)
+    │   ├── sql_tool.py              # Read-only SQL for the agent + schema notes
+    │   └── tracing.py               # OTEL tracing (log file, console, or OTLP)
     ├── scraper/
     │   └── arista.py                # CSAF JSON + advisory list scraper
     ├── enricher/
@@ -262,7 +301,8 @@ advisory-intel/
     │   ├── epss.py                  # FIRST.org EPSS API
     │   └── kev.py                   # CISA KEV catalog
     ├── ai/
-    │   └── classifier.py            # Claude AI classification + insights
+    │   ├── classifier.py            # Claude AI classification + insights
+    │   └── budget.py                # Per-run spend cap (classifier + agent hook)
     ├── analyzer/
     │   └── patterns.py              # SQL-based pattern analysis (7 queries)
     ├── rules/
@@ -278,10 +318,10 @@ advisory-intel/
 
 **4 tables** in SQLite with WAL mode:
 
-- `advisories` — 183 records: id, title, url, published_date, description, affected_products
-- `cves` — 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
-- `ai_classifications` — 183 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
-- `semgrep_rules` — 9 records: cwe_id, cwe_name, rule_id, rule_yaml, rationale
+- `advisories`: 183 records: id, title, url, published_date, description, affected_products
+- `cves`: 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
+- `ai_classifications`: 183 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
+- `semgrep_rules`: 9 records: cwe_id, cwe_name, rule_id, rule_yaml, rationale
 
 ## Data Coverage
 
@@ -308,17 +348,32 @@ advisory-intel/
 
 Data as of 2026-10-01 (through SA-0184).
 
+## Known Limitations
+
+- **Dates:** `published_date` comes in three text formats and is empty for 14
+  advisories, so the dashboard's yearly trend counts by CVE year as a proxy.
+  The volume figures above were recounted from advisory dates.
+- **CWE coverage:** 41% of CVEs have no CWE (NVD had data for only 121 of 346),
+  so the CWE ranking undercounts.
+- **AI tags:** classifications use fixed category lists and JSON-only output,
+  and the parser handles wrapped or multi-object replies, but the tags have not
+  yet been checked against a hand-labeled sample.
+- **Semgrep rules:** Python templates written from CWE patterns. They are not
+  deployed in any CI pipeline and have not been run against Arista code.
+- **Public data only:** nothing here reflects Arista's internal process; root
+  causes behind repeated issues are not visible from advisories.
+
 ## Tech Stack
 
-- **Python 3.12** — core pipeline (3.10+ required for Strands SDK)
-- **Strands Agents SDK** — agentic framework with `@tool` decorator, model-driven reasoning loop
-- **SQLite** (WAL mode) — single-file database, no external DB needed
-- **FastAPI + Uvicorn** — REST API + dashboard server
-- **Chart.js 4.4** — interactive charts (CDN, no build step)
-- **Claude Haiku 4.5** — advisory classification, insights, and agent reasoning (~$0.25 for full pipeline run)
-- **OpenTelemetry** — distributed tracing for agent decision audit trail (console or OTLP/Grafana)
-- **Docker SDK** — ComplianceGuard bridge for live container scanning
-- **Semgrep YAML** — output format for SAST rules
+- **Python 3.12**: core pipeline (3.10+ required for Strands SDK)
+- **Strands Agents SDK**: agentic framework with `@tool` decorator, model-driven reasoning loop
+- **SQLite** (WAL mode): single-file database, no external DB needed
+- **FastAPI + Uvicorn**: REST API + dashboard server
+- **Chart.js 4.4**: interactive charts (CDN, no build step)
+- **Claude Haiku 4.5**: advisory classification, insights, and agent reasoning (~$0.25 for a full classification run; every run capped at $0.50)
+- **OpenTelemetry**: agent decision audit trail (log file by default, console, or OTLP/Grafana)
+- **Docker SDK**: ComplianceGuard bridge for live container scanning
+- **Semgrep YAML**: output format for SAST rules
 
 ## API Endpoints
 
