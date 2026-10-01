@@ -129,7 +129,8 @@ def eval_tool_selection(agent) -> list[EvalResult]:
     for case in TOOL_SELECTION_CASES:
         start = time.time()
         try:
-            msg_count_before = len(agent.messages) if hasattr(agent, 'messages') else 0
+            agent.messages.clear()  # each case starts fresh; shared history multiplies cost
+            msg_count_before = 0
             response = agent(case["query"])
             elapsed = time.time() - start
 
@@ -197,6 +198,7 @@ def eval_data_accuracy(agent) -> list[EvalResult]:
     # Test 1: Advisory count accuracy
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent("How many advisories and CVEs are in the database? Give me the exact numbers.")
         resp_text = str(response)
         passed = str(actual_advisory_count) in resp_text and str(actual_cve_count) in resp_text
@@ -219,6 +221,7 @@ def eval_data_accuracy(agent) -> list[EvalResult]:
     # Test 2: KEV count accuracy
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent("How many CVEs are in the CISA Known Exploited Vulnerabilities catalog?")
         resp_text = str(response)
         passed = str(actual_kev_count) in resp_text
@@ -252,6 +255,7 @@ def eval_hallucination_resistance(agent) -> list[EvalResult]:
     # Test 1: Nonexistent CVE
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent("What is the CVSS score for CVE-2099-99999?")
         resp_text = str(response).lower()
         hallucinated = any(
@@ -286,6 +290,7 @@ def eval_hallucination_resistance(agent) -> list[EvalResult]:
     # Test 2: Nonexistent advisory
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent("Tell me about advisory SA-9999")
         resp_text = str(response).lower()
         passed = any(
@@ -327,6 +332,7 @@ def eval_multi_step(agent) -> list[EvalResult]:
     # Test: Cross-reference patterns with rule coverage
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent(
             "Which of the top 3 recurring CWE patterns have Semgrep rule coverage, "
             "and which ones don't? List them with their counts."
@@ -367,6 +373,7 @@ def eval_escalation_judgment(agent) -> list[EvalResult]:
 
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent(
             "Which CVEs should be our top priority to address? "
             "Consider CVSS score, EPSS exploit probability, and KEV status."
@@ -408,6 +415,7 @@ def eval_cross_project(agent) -> list[EvalResult]:
     # Test 1: Infrastructure scan
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent("Scan the live infrastructure for compliance violations.")
         resp_text = str(response).lower()
         has_scan_data = any(
@@ -433,6 +441,7 @@ def eval_cross_project(agent) -> list[EvalResult]:
     # Test 2: Cross-reference (the closed loop)
     start = time.time()
     try:
+        agent.messages.clear()  # each case starts fresh; shared history multiplies cost
         response = agent(
             "Cross-reference our top CWE patterns with infrastructure compliance. "
             "Which advisory weakness classes overlap with container security gaps?"

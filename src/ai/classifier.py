@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 
 import anthropic
 
+from src.ai.budget import BudgetExceeded, RunBudget
 from src.db import get_connection
+
+MODEL = "claude-haiku-4-5-20251001"
 
 CLASSIFICATION_PROMPT = """You are a product security analyst. Analyze this Arista EOS security advisory and extract structured information.
 
@@ -52,8 +55,9 @@ def get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def classify_advisory(advisory_id: str) -> dict | None:
-    """Classify a single advisory using Claude."""
+def classify_advisory(advisory_id: str, budget: RunBudget | None = None) -> dict | None:
+    """Classify a single advisory using Claude. Raises BudgetExceeded at the cap."""
+    budget = budget or RunBudget()
     conn = get_connection()
     adv = conn.execute(
         "SELECT * FROM advisories WHERE id = ?", (advisory_id,)
@@ -72,22 +76,20 @@ def classify_advisory(advisory_id: str) -> dict | None:
         for r in cves
     )
 
+    prompt = CLASSIFICATION_PROMPT.format(
+        title=adv["title"],
+        advisory_id=advisory_id,
+        description=(adv["description"] or "")[:3000],
+        cves=cve_str or "None listed",
+    )
+    budget.reserve(MODEL, prompt, 500)
     client = get_client()
     resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=MODEL,
         max_tokens=500,
-        messages=[
-            {
-                "role": "user",
-                "content": CLASSIFICATION_PROMPT.format(
-                    title=adv["title"],
-                    advisory_id=advisory_id,
-                    description=(adv["description"] or "")[:3000],
-                    cves=cve_str or "None listed",
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
+    budget.record(MODEL, resp.usage)
 
     try:
         text = resp.content[0].text
@@ -134,36 +136,46 @@ def classify_all():
         print("All advisories already classified.")
         return
 
-    print(f"Classifying {len(rows)} advisories with Claude...")
+    budget = RunBudget()
+    print(f"Classifying {len(rows)} advisories with Claude (cap ${budget.cap_usd:.2f})...")
     for i, row in enumerate(rows, 1):
         print(f"  [{i}/{len(rows)}] {row['id']}...")
         try:
-            classify_advisory(row["id"])
+            classify_advisory(row["id"], budget)
+        except BudgetExceeded as e:
+            print(f"  Stopping: {e}. {len(rows) - i + 1} advisories left for the next run.")
+            break
+        except anthropic.BadRequestError as e:
+            # Billing and request errors fail every call the same way; don't repeat them
+            print(f"  Stopping: {e.message}")
+            break
         except Exception as e:
             print(f"    Error: {e}")
 
-    print("Classification complete.")
+    print(f"Classification complete. {budget.summary()}")
 
 
-def generate_insights(analysis: dict) -> list[dict]:
+def generate_insights(analysis: dict, budget: RunBudget | None = None) -> list[dict]:
     """Generate program-level insights from analysis data."""
+    budget = budget or RunBudget()
+    prompt = INSIGHT_PROMPT.format(
+        cwe_data=json.dumps(analysis.get("cwe_distribution", [])[:10]),
+        severity_data=json.dumps(analysis.get("severity_distribution", {})),
+        attack_surface_data=json.dumps(analysis.get("attack_surface", {})),
+        component_data=json.dumps(analysis.get("component_heatmap", [])[:10]),
+        yearly_data=json.dumps(analysis.get("yearly_trend", [])),
+    )
+    try:
+        budget.reserve(MODEL, prompt, 4000)
+    except BudgetExceeded as e:
+        return [{"finding": str(e), "impact": "", "recommendation": ""}]
     client = get_client()
     resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=MODEL,
         max_tokens=4000,
-        messages=[
-            {
-                "role": "user",
-                "content": INSIGHT_PROMPT.format(
-                    cwe_data=json.dumps(analysis.get("cwe_distribution", [])[:10]),
-                    severity_data=json.dumps(analysis.get("severity_distribution", {})),
-                    attack_surface_data=json.dumps(analysis.get("attack_surface", {})),
-                    component_data=json.dumps(analysis.get("component_heatmap", [])[:10]),
-                    yearly_data=json.dumps(analysis.get("yearly_trend", [])),
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
+    budget.record(MODEL, resp.usage)
 
     try:
         text = resp.content[0].text.strip()

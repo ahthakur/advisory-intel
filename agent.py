@@ -20,6 +20,7 @@ from strands import Agent
 from strands.models.anthropic import AnthropicModel
 
 from src.agent.tools import ALL_TOOLS
+from src.ai.budget import AgentBudgetHook
 from src.agent.tracing import initialize_tracing, shutdown_tracing, get_tracer
 from src.db import init_db
 
@@ -75,14 +76,17 @@ overlap — that's where real risk lives."""
 
 def create_agent() -> Agent:
     """Create the advisory-intel agent with Anthropic model and pipeline tools."""
+    model_id = "claude-haiku-4-5-20251001"
+    max_tokens = 8192
     model = AnthropicModel(
-        model_id="claude-haiku-4-5-20251001",
-        max_tokens=8192,
+        model_id=model_id,
+        max_tokens=max_tokens,
     )
     return Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=ALL_TOOLS,
+        hooks=[AgentBudgetHook(model_id, max_tokens)],
     )
 
 
