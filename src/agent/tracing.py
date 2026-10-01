@@ -3,12 +3,14 @@
 Provides a decision audit trail: which tools were called, how long each
 took, what data was returned, and the full agent reasoning chain.
 
-Console exporter by default (for demos). Set OTEL_EXPORTER_OTLP_ENDPOINT
-to send traces to Grafana/Tempo/Jaeger.
+Spans are appended to data/agent_traces.log by default, so the terminal shows
+only the agent's answer. Set OTEL_CONSOLE=1 to print them to stderr instead,
+or OTEL_EXPORTER_OTLP_ENDPOINT to send them to Grafana/Tempo/Jaeger.
 """
 
 import os
 import sys
+from pathlib import Path
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -19,6 +21,9 @@ from opentelemetry.sdk.trace.export import (
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 
 _tracer_provider: TracerProvider | None = None
+
+
+TRACE_LOG = Path(__file__).parent.parent.parent / "data" / "agent_traces.log"
 
 
 def initialize_tracing() -> None:
@@ -42,8 +47,13 @@ def initialize_tracing() -> None:
             )
         except ImportError:
             _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stderr)))
-    else:
+    elif os.getenv("OTEL_CONSOLE") == "1":
         _tracer_provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stderr)))
+    else:
+        TRACE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        _tracer_provider.add_span_processor(
+            SimpleSpanProcessor(ConsoleSpanExporter(out=open(TRACE_LOG, "a")))
+        )
 
     trace.set_tracer_provider(_tracer_provider)
 
