@@ -319,7 +319,7 @@ advisory-intel/
 **4 tables** in SQLite with WAL mode:
 
 - `advisories`: 183 records: id, title, url, published_date, description, affected_products
-- `cves`: 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date
+- `cves`: 346 records: cve_id, advisory_id, cvss_score/vector/version, cwe_id, attack_vector/complexity/privileges, epss_score/percentile, kev_listed/date/vendor
 - `ai_classifications`: 183 records: advisory_id, affected_component, attack_surface, vulnerability_category, root_cause_category, mitigation_quality
 - `semgrep_rules`: 9 records: cwe_id, cwe_name, rule_id, rule_yaml, rationale
 
@@ -333,13 +333,13 @@ advisory-intel/
 | With CVSS scores | 242 (70%) |
 | With CWE IDs | 203 (59%) |
 | With EPSS scores | 334 (97%) |
-| In CISA KEV | 12 |
+| In CISA KEV | 12 (3 Arista, 9 upstream or third-party) |
 | AI classified | 183 (100%) |
 | Semgrep rules generated | 9 (covering 6 CWE categories) |
 
 ## Key Findings (from the data)
 
-- **KEV status has to override the scores.** 4 Arista CVEs were added to CISA KEV in 2026; 3 of the 4 have EPSS under 0.02, and one (SA-0137) is CVSS 5.8. Of 30 CVEs scored CVSS 9 or higher, only 4 are in KEV.
+- **KEV status has to override the scores.** Three of Arista's own CVEs are in CISA KEV, all added in 2026, and all three had EPSS under 0.02. One (SA-0137) is CVSS 5.8. The other 9 KEV matches are upstream or third-party CVEs that Arista advisories respond to (Log4j, Bash, OpenSSL, the Linux kernel including Copy Fail, and a reposted VMware-era VeloCloud CVE); they are counted separately.
 - **CWE-78 (OS Command Injection)** is the #1 recurring weakness: 11 occurrences, avg CVSS 8.2. 8 of the 11 were published in 2026, mostly in the NG Firewall and VeloCloud product lines.
 - **VeloCloud Orchestrator on-prem** had two CVSS 10.0, KEV-listed issues eight weeks apart (SA-0144, SA-0183) with the same described impact.
 - **82% of CVEs with full CVSS vectors are network-reachable** (94 of 115); 45% (52 of 115) are also low complexity with no privileges required.
@@ -360,6 +360,12 @@ Data as of 2026-10-01 (through SA-0184).
   yet been checked against a hand-labeled sample.
 - **Semgrep rules:** Python templates written from CWE patterns. They are not
   deployed in any CI pipeline and have not been run against Arista code.
+- **Upstream CVEs in advisories:** Arista publishes advisories for upstream
+  open-source issues, often to say which products are not affected. Those CVEs
+  are in the `cves` table too. KEV counts are split using the KEV catalog's
+  `vendorProject` field; other aggregates (CWE ranking, severity mix) still
+  include upstream CVEs. An earlier version reported "12 Arista CVEs in KEV";
+  the correct figure is 3.
 - **Public data only:** nothing here reflects Arista's internal process; root
   causes behind repeated issues are not visible from advisories.
 

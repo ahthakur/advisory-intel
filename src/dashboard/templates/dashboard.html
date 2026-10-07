@@ -489,7 +489,7 @@
             <div class="stat"><span class="value" id="stat-cves">—</span><span class="label">CVEs</span></div>
             <div class="stat"><span class="value" id="stat-enriched">—</span><span class="label">Enriched</span></div>
             <div class="stat"><span class="value" id="stat-classified">—</span><span class="label">AI Classified</span></div>
-            <div class="stat"><span class="value" id="stat-kev">—</span><span class="label">CISA KEV</span></div>
+            <div class="stat"><span class="value" id="stat-kev">—</span><span class="label">Arista CVEs in KEV</span></div>
         </div>
     </div>
 
@@ -527,7 +527,7 @@
                             <div class="kf-detail" id="kf-top-cwe-detail"></div>
                         </div>
                         <div class="key-finding" style="border-left-color: var(--critical)">
-                            <div class="kf-label">CISA KEV Matches</div>
+                            <div class="kf-label">Arista CVEs in CISA KEV</div>
                             <div class="kf-value" id="kf-kev">—</div>
                             <div class="kf-detail" id="kf-kev-detail">actively exploited in the wild</div>
                         </div>
@@ -718,7 +718,7 @@
                 document.getElementById('stat-cves').textContent = data.cves;
                 document.getElementById('stat-enriched').textContent = data.enriched;
                 document.getElementById('stat-classified').textContent = data.classified;
-                document.getElementById('stat-kev').textContent = data.kev_listed;
+                document.getElementById('stat-kev').textContent = data.kev_arista;
             } catch (e) { console.error('Summary load failed:', e); }
         }
 
@@ -740,7 +740,11 @@
                     `${top.count} occurrences, avg CVSS ${(top.avg_cvss || 0).toFixed(1)}`;
             }
             if (data.kev_matches && data.kev_matches.length) {
-                document.getElementById('kf-kev').textContent = data.kev_matches.length + ' CVEs';
+                const own = data.kev_matches.filter(k => k.arista_own).length;
+                const upstream = data.kev_matches.length - own;
+                document.getElementById('kf-kev').textContent = own + ' CVEs';
+                document.getElementById('kf-kev-detail').textContent =
+                    `actively exploited; plus ${upstream} upstream or third-party CVEs (Log4j, Bash, OpenSSL) covered by Arista advisories`;
             }
             if (data.attack_surface && data.attack_surface.attack_vector && data.attack_surface.attack_vector.length) {
                 const top = data.attack_surface.attack_vector[0];

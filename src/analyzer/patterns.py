@@ -96,7 +96,7 @@ def epss_vs_cvss() -> list[dict]:
     conn = get_connection()
     rows = conn.execute("""
         SELECT cve_id, advisory_id, cvss_score, epss_score, epss_percentile,
-               cwe_id, attack_vector, kev_listed
+               cwe_id, attack_vector, kev_listed, kev_vendor
         FROM cves
         WHERE cvss_score IS NOT NULL AND epss_score IS NOT NULL
         ORDER BY epss_score DESC
@@ -110,7 +110,8 @@ def kev_matches() -> list[dict]:
     conn = get_connection()
     rows = conn.execute("""
         SELECT c.cve_id, c.advisory_id, c.cvss_score, c.epss_score,
-               c.kev_date_added, a.title
+               c.kev_date_added, c.kev_vendor,
+               (c.kev_vendor = 'Arista') as arista_own, a.title
         FROM cves c
         JOIN advisories a ON c.advisory_id = a.id
         WHERE c.kev_listed = 1

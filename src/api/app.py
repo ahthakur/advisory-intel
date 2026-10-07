@@ -45,6 +45,9 @@ async def api_summary():
     kev_count = conn.execute(
         "SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1"
     ).fetchone()["c"]
+    kev_arista = conn.execute(
+        "SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1 AND kev_vendor = 'Arista'"
+    ).fetchone()["c"]
     conn.close()
     return {
         "advisories": advisory_count,
@@ -52,6 +55,7 @@ async def api_summary():
         "enriched": enriched,
         "classified": classified,
         "kev_listed": kev_count,
+        "kev_arista": kev_arista,
     }
 
 

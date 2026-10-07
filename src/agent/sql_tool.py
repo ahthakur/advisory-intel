@@ -28,7 +28,7 @@ Tables (SQLite):
        cwe_id 'CWE-78', attack_vector 'NETWORK'|'ADJACENT_NETWORK'|'LOCAL'|'PHYSICAL',
        attack_complexity 'LOW'|'HIGH', privileges_required 'NONE'|'LOW'|'HIGH',
        epss_score REAL 0-1, epss_percentile REAL 0-1, kev_listed INTEGER 0|1,
-       kev_date_added 'YYYY-MM-DD')
+       kev_date_added 'YYYY-MM-DD', kev_vendor 'Arista'|'Apache'|'GNU'|...)
 - ai_classifications(advisory_id, affected_component, attack_surface
        'management-plane'|'control-plane'|'data-plane'|'local-only'|'unknown',
        vulnerability_category, root_cause_category, mitigation_quality)
@@ -36,6 +36,9 @@ Tables (SQLite):
 - semgrep_rules(cwe_id, rule_id, rule_yaml, rationale)
 
 Gotchas:
+- Arista advisories also cover upstream CVEs (Log4j, Bash, OpenSSL, Linux kernel)
+  and reposted VMware-era VeloCloud ones. For Arista's own exploited CVEs use
+  kev_listed = 1 AND kev_vendor = 'Arista'; kev_listed = 1 alone includes upstream.
 - One advisory has many CVEs. To count advisories from the cves table use
   COUNT(DISTINCT advisory_id); COUNT(*) on cves counts CVEs.
 - published_date is free text in mixed formats ('September 22, 2026',

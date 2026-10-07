@@ -65,6 +65,9 @@ def enrich_cves(source: str = "all") -> str:
     kev_count = conn.execute(
         "SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1"
     ).fetchone()["c"]
+    kev_arista = conn.execute(
+        "SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1 AND kev_vendor = 'Arista'"
+    ).fetchone()["c"]
     epss_count = conn.execute(
         "SELECT COUNT(*) as c FROM cves WHERE epss_score IS NOT NULL"
     ).fetchone()["c"]
@@ -73,7 +76,8 @@ def enrich_cves(source: str = "all") -> str:
     return (
         f"Enrichment complete ({', '.join(sources_run)}). "
         f"CVEs enriched from NVD: {enriched}, with EPSS scores: {epss_count}, "
-        f"in CISA KEV: {kev_count}."
+        f"in CISA KEV: {kev_count} ({kev_arista} Arista, "
+        f"{kev_count - kev_arista} upstream or third-party)."
     )
 
 
@@ -129,6 +133,7 @@ def query_advisory_db(question: str) -> str:
             "enriched": conn.execute("SELECT COUNT(*) as c FROM cves WHERE enriched_at IS NOT NULL").fetchone()["c"],
             "classified": conn.execute("SELECT COUNT(*) as c FROM ai_classifications").fetchone()["c"],
             "kev_listed": conn.execute("SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1").fetchone()["c"],
+            "kev_arista": conn.execute("SELECT COUNT(*) as c FROM cves WHERE kev_listed = 1 AND kev_vendor = 'Arista'").fetchone()["c"],
             "semgrep_rules": conn.execute("SELECT COUNT(*) as c FROM semgrep_rules").fetchone()["c"],
         }
 
@@ -153,7 +158,7 @@ def query_advisory_db(question: str) -> str:
     if any(w in q for w in ["kev", "exploited", "cisa", "actively"]):
         rows = conn.execute("""
             SELECT c.cve_id, c.advisory_id, c.cvss_score, c.epss_score,
-                   c.kev_date_added, a.title
+                   c.kev_date_added, c.kev_vendor, a.title
             FROM cves c JOIN advisories a ON c.advisory_id = a.id
             WHERE c.kev_listed = 1
             ORDER BY c.kev_date_added DESC
@@ -254,7 +259,11 @@ def analyze_patterns() -> str:
         summary_parts.append(f"Severity: {json.dumps(severity)}")
 
     kev = analysis.get("kev_matches", [])
-    summary_parts.append(f"KEV-listed CVEs: {len(kev)}")
+    kev_arista = sum(1 for k in kev if k.get("kev_vendor") == "Arista")
+    summary_parts.append(
+        f"KEV-listed CVEs: {kev_arista} Arista, "
+        f"{len(kev) - kev_arista} upstream or third-party covered by Arista advisories"
+    )
 
     trend = analysis.get("yearly_trend", [])
     if trend:

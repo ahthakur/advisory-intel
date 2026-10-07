@@ -52,6 +52,7 @@ def init_db():
             epss_percentile REAL,
             kev_listed INTEGER DEFAULT 0,
             kev_date_added TEXT,
+            kev_vendor TEXT,
             nvd_description TEXT,
             enriched_at TEXT,
             FOREIGN KEY (advisory_id) REFERENCES advisories(id)
@@ -81,4 +82,15 @@ def init_db():
         );
     """)
     conn.commit()
+    conn.close()
+    ensure_columns()
+
+
+def ensure_columns():
+    """Add columns introduced after the first release to existing databases."""
+    conn = get_connection()
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(cves)")}
+    if "kev_vendor" not in existing:
+        conn.execute("ALTER TABLE cves ADD COLUMN kev_vendor TEXT")
+        conn.commit()
     conn.close()
